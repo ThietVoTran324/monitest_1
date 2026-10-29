@@ -4,14 +4,7 @@
 
 Uptime-style website monitoring: HTTP checks, incidents, email alerts, status pages, SSL/domain expiry — built for correctness on a small shared VPS.
 
-| | |
-|--|--|
-| **API health** | https://monitoring1.io.vn/api/v1/health |
-| **Host** | `pinvps01` (`116.118.9.162`), path `/opt/moni` |
-| **Coexists with** | `https://monitest.top` → `/opt/pinterest` (do not touch) |
-| **Repo** | https://github.com/ThietVoTran324/monitest_1 |
-
-## Current status (2026-10-29)
+## Current status
 
 | Area | Status |
 |------|--------|
