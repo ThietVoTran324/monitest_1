@@ -30,13 +30,22 @@ def upgrade() -> None:
         sa.Column("alert_outbox_backoff_seconds", sa.String(length=255), nullable=True),
     )
 
+    # create_type=False: explicit create() below; avoid DuplicateObject on create_table
     outbox_status = sa.Enum(
         "pending",
         "sent",
         "failed",
         name="email_outbox_status",
+        create_type=False,
     )
-    outbox_status.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        sa.text(
+            "DO $$ BEGIN "
+            "CREATE TYPE email_outbox_status AS ENUM ('pending', 'sent', 'failed'); "
+            "EXCEPTION WHEN duplicate_object THEN NULL; "
+            "END $$;"
+        )
+    )
 
     op.create_table(
         "email_outbox",
