@@ -86,8 +86,10 @@ Google Cloud Console: thêm đúng redirect URI trên.
 
 - [x] FQDN chốt: `monitoring1.io.vn`  
 - [x] A record OK (`dig` khớp IP VPS)  
-- [ ] Stack loopback health OK  
-- [ ] Caddy block + HTTPS OK  
-- [ ] OAuth OK  
-- [ ] Smoke prod OK  
-- [ ] `VPS_HOST` → `pinvps01`
+- [x] Stack loopback health OK  
+- [x] Caddy block + HTTPS OK  
+- [x] OAuth OK  
+- [x] Smoke prod OK  
+- [ ] `VPS_HOST` → `pinvps01` (+ `ENABLE_PROD_DEPLOY=true`)  
+
+> Wave log: [`../build_history/wave_2026-10_upgrade_golive.md`](../build_history/wave_2026-10_upgrade_golive.md) · bugs: [`../bug_history.md`](../bug_history.md)

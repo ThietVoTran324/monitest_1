@@ -38,7 +38,7 @@ Implement_docs/<Phase>_SprintN/   ← BR base → Plan #1 → decisions → chec
 | Security Type1 hotfix | **DONE** 2026-08-08 | Type2 → security_followups |
 | **Admin Ops (Phase 3.x)** | Sprint1–4 **CLOSED** (MVP complete) | [`admin/`](admin/) |
 | Home feed personalization | Plan #1 **CHỐT**; Plan #2 OPEN; P4 defer | [`feed_personalization.md`](feed_personalization.md) · [`../Implement_docs/Feed_Sprint1/`](../Implement_docs/Feed_Sprint1/) |
-| **MONI hardening + go-live** | Macro **DRAFT**; Sprint0–12 scaffold OPEN | [`moni/`](moni/) · [`../Implement_docs/Moni_Sprint0/`](../Implement_docs/Moni_Sprint0/) … |
+| **MONI hardening + go-live** | Macro **LIVE**; S0/1/2/4/6/8/10 DONE; HTTPS on `pinvps01` 2026-10-29; smoke+CD Pending | [`moni/`](moni/) · [`../Implement_docs/build_history/`](../Implement_docs/build_history/) · [`../Implement_docs/bug_history.md`](../Implement_docs/bug_history.md) |
 
 ## Sprint đã đóng (Phase 0)
 

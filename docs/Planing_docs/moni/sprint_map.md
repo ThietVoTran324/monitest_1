@@ -7,7 +7,7 @@
 
 | Phase | Sprint | Folder | Mục tiêu shippable | Depends | Status |
 |-------|--------|--------|--------------------|---------|--------|
-| H0 | 0 | [`Moni_Sprint0`](../../Implement_docs/Moni_Sprint0/) | Runtime modes + VPS prep | — | **DONE** 2026-10-29 (VPS ticks Pending) |
+| H0 | 0 | [`Moni_Sprint0`](../../Implement_docs/Moni_Sprint0/) | Runtime modes + VPS prep | — | **DONE** 2026-10-29 (HTTPS live; smoke/CD Pending — [build_history](../../Implement_docs/build_history/)) |
 | H1 | 1 | [`Moni_Sprint1`](../../Implement_docs/Moni_Sprint1/) | SSRF redirect/body/DNS re-check | 0 partial | **DONE** 2026-10-27 |
 | H1 | 2 | [`Moni_Sprint2`](../../Implement_docs/Moni_Sprint2/) | Consistency stale + 1 open incident | — | **DONE** 2026-10-27 |
 | H2 | 3 | [`Moni_Sprint3`](../../Implement_docs/Moni_Sprint3/) | Celery/Redis load + chaos prove | after GL | **OPEN** |

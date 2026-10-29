@@ -38,6 +38,8 @@ Mỗi folder: `PLANNING_TRIO.md` · `base requirement.md` · `business_requireme
 
 - [`../../Implement_docs/lessonlearn.md`](../../Implement_docs/lessonlearn.md) — áp dụng hết  
 - [`../../Implement_docs/issues_history.md`](../../Implement_docs/issues_history.md) — log sự cố  
+- [`../../Implement_docs/bug_history.md`](../../Implement_docs/bug_history.md) — bug wave upgrade/golive  
+- [`../../Implement_docs/build_history/`](../../Implement_docs/build_history/) — biên niên build/deploy/golive  
 
 ## Quyết định hệ thống (rút)
 
@@ -50,4 +52,5 @@ Xem macro plan §6 (D1–D10). Tóm: GL = 1 region thật + S5 honesty; multi-re
 | Macro plan | **LIVE** — §2.0 status 2026-10-29 |
 | Sprint scaffold 0–12 | **DONE** 2026-10-27 |
 | DONE | S0, S1, S2, S4, S6, S8, S10 |
-| Next | **Go-live gate** (VPS) rồi Plan #1 **Moni_Sprint12** |
+| Go-live host | HTTPS `monitoring1.io.vn` OK 2026-10-29; smoke UI + CD retarget Pending — [`build_history/wave_2026-10_upgrade_golive.md`](../../Implement_docs/build_history/wave_2026-10_upgrade_golive.md) |
+| Next | Smoke → pull `937975c` → `VPS_HOST` → rồi Plan #1 **Moni_Sprint12** |

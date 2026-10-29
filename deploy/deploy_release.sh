@@ -29,6 +29,14 @@ set +a
 
 echo "DEPLOY_START backend=${BACKEND_IMAGE} frontend=${FRONTEND_IMAGE}"
 
+# GHCR rejects mixed-case repository paths
+case "${BACKEND_IMAGE}" in
+  *[[:upper:]]*) echo "BACKEND_IMAGE must be lowercase GHCR path: ${BACKEND_IMAGE}" >&2; exit 1 ;;
+esac
+case "${FRONTEND_IMAGE}" in
+  *[[:upper:]]*) echo "FRONTEND_IMAGE must be lowercase GHCR path: ${FRONTEND_IMAGE}" >&2; exit 1 ;;
+esac
+
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
 "${COMPOSE[@]}" pull

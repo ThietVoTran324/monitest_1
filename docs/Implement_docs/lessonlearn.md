@@ -199,6 +199,16 @@ Package manifest / lockfile / requirements.txt khai báo thư viện ≠ môi tr
 Script trong scripts/ phải *tự bootstrap* (đọc config, kết nối DB, context app) — không chỉ vài dòng giả định REPL/shell đã có sẵn biến.
  
 Snippet tương tác → README/runbook; file .py`/.sh` → chạy độc lập được.
+
+### C7. Go-live shared host + registry + migrate (pattern 2026-10)
+
+- **GHCR / OCI tags:** path image (owner/name) phải *lowercase* — normalize `repository_owner` trước khi tag/push.
+- **Secrets vs tags:** file secrets (`.env`) không bị CI `sed` mỗi deploy; image tag qua file riêng (vd. `.env.images`) hoặc env compose.
+- **Shared VPS:** project compose *riêng* (path/volume/container prefix khác app cũ); public proxy *append* site, không replace; bind app chỉ loopback; **swap** (hoặc memory headroom) trước khi `up` stack thứ hai.
+- **Postgres ENUM + Alembic:** không `Enum.create()` rồi lại `create_table` với `create_type=True`; prove `upgrade head` trên DB trống. Nếu env bọc *một* transaction cho cả chuỗi revision — fail cuối có thể rollback *hết* schema.
+- **ACME:** đợi `certificate obtained` trong log trước khi kết luận TLS hỏng.
+- **CD gate:** smoke HTTPS/UI trên host mới *trước* khi đổi secret deploy (`VPS_HOST`, …). Hotfix trong container đang chạy phải có commit + image — tránh drift.
+- **Log wave:** biên niên → `Implement_docs/build_history/`; bug chi tiết → `bug_history.md` (cùng template issues).
  
 ---
  
@@ -731,7 +741,8 @@ Copy sang `planing_doc/<initiative>/MILESTONE_INDEX.md` khi đóng sprint. File 
 | Extended | Phase 2 theo spec mở rộng | module/package phụ |
 | Gap | Spec code UI + chốt giữ/làm sau | *_gap_debate.md |
 | Verify | Automated + manual smoke | test README, collection API |
-| Distill | Pattern → file multi-project | lessonlearn, issues_history §1–8 |
+| Go-live / release | Host wiring, CI image, CD gate | `build_history/wave_*.md`, `artifacts_*.md` |
+| Distill | Pattern → file multi-project | lessonlearn, issues_history, **bug_history** |
  
 *Ba kênh test (mẫu chốt):* (1) automated persistence/domain, (2) automated HTTP/contract, (3) manual collection — xem E12–E13.
  

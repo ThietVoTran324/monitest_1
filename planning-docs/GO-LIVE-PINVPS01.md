@@ -1,8 +1,12 @@
 # MONI go-live — shared VPS `pinvps01`
 
-Status date: **2026-10-26**. Machine facts come from `server-context.md` (measured 17:39 UTC+7 the same day).
+Status date: **2026-10-29** (host wiring largely done). Machine facts originally from `server-context.md` (2026-10-26).
 
-This file is the current go-live plan. Older runbooks still describe a different host and proxy:
+**Live now:** FQDN `monitoring1.io.vn` on `pinvps01`, Caddy + TLS, compose `/opt/moni`, loopback `8010`/`4173`.  
+**Still open:** UI smoke, pull image with migration fix, retarget GitHub `VPS_HOST`.  
+**Wave docs:** `docs/Implement_docs/build_history/`, `docs/Implement_docs/bug_history.md`.
+
+This file remains the host go-live plan. Older runbooks still describe a different host and proxy:
 
 - `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` targets `x3mphim.click` behind **host Nginx + Certbot**, and tells the operator not to touch `myauction.fun`.
 - A previous MONI deploy (April 2026) used another VPS path (`/opt/moni/monitest_1`) and host Nginx.
