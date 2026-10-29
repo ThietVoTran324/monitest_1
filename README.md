@@ -1,131 +1,92 @@
 # MONI
 
-**Go-live target:** shared VPS `pinvps01` (see `server-context.md` and `planning-docs/GO-LIVE-PINVPS01.md`).  
-`monitest.top` on that machine is a different app in `/opt/pinterest`. MONI is not deployed there yet, and its public hostname is not chosen.
+Uptime-style website monitoring: HTTP checks, incidents, email alerts, status pages, SSL/domain expiry — built for correctness on a small shared VPS.
 
-MONI is an uptime-style monitoring system focused on reliable website checks, clear incident state transitions, and practical operational workflows.
+| | |
+|--|--|
+| **Production** | https://monitoring1.io.vn |
+| **API health** | https://monitoring1.io.vn/api/v1/health |
+| **Host** | `pinvps01` (`116.118.9.162`), path `/opt/moni` |
+| **Coexists with** | `https://monitest.top` → `/opt/pinterest` (do not touch) |
+| **Repo** | https://github.com/ThietVoTran324/monitest_1 |
 
-## Upgrade session highlights (current)
+## Current status (2026-10-29)
 
-This upgrade cycle completed a large backend+frontend hardening and feature block. The key additions are:
+| Area | Status |
+|------|--------|
+| HTTPS + Caddy (`monitoring1.io.vn` / www) | **Live** |
+| Compose stack (api/worker/beat/frontend/postgres/redis) | **Live** (loopback `8010` / `4173`) |
+| Alembic head | `d3e4f5a6b7c8` |
+| UI smoke (auth / monitor / check) | **OK** |
+| CI `migrate-smoke` + GHCR `build-and-push` | On every push to `main` |
+| CD SSH → `/opt/moni` | **Off until enabled** (see [CI/CD](#cicd)) |
 
-- **Monitor contract migration:** from CSV probe regions to mapping table (`monitor_regions`) with explicit `active_region` execution model (resource-saving, one active region per cycle).
-- **Region catalog:** dedicated `probe_regions` API/model flow for controlled region selection.
-- **Status pages:** managed private/public status pages with monitor mapping and maintenance notes.
-- **SSL/domain expiry monitoring:** expiry status storage, check tasks, summary APIs, and alert threshold tracking.
-- **Runtime observability:** runtime health and queue profile APIs with dashboard integration.
-- **Operational hardening:** safer local restart scripts, strict Celery topology checks, and packaged smoke gate script.
-- **Deploy safety:** CI deploy pipeline now runs Alembic migration through the live `api` service container, then restarts `api/worker/beat` to keep code and schema synchronized.
+Hardening wave log: [`docs/Implement_docs/build_history/`](docs/Implement_docs/build_history/) · bugs: [`docs/Implement_docs/bug_history.md`](docs/Implement_docs/bug_history.md)
 
-## What this project does
+## What it does
 
-MONI lets a user:
-- create monitors (HTTP first, with TCP/ICMP planned)
-- run checks on schedule and manually
-- track status history, incidents, and alerts
-- receive email alerts for outage/recovery
-- manage public/private status pages with selected monitor exposure
-- monitor SSL/domain expiry state and warning thresholds
-- configure monitor regions with explicit single active execution region
+- Register / login (email+password, verify, Google OAuth)
+- HTTP monitors: CRUD, schedule, manual run-check, accepted status codes
+- Check history, incidents, email alerts (cooldown / still-down / outbox)
+- Status pages (private/public) + maintenance notes
+- SSL/domain expiry checks and threshold alerts
+- Region catalog + `active_region` (one execution region per cycle — not multi-region fanout)
+- Runtime health / queue profile (dashboard non-blocking)
 
-The project is optimized for correctness and operability over feature sprawl.
+**Out of scope (for now):** TCP/ICMP execution, real multi-location agents, WebSocket, Slack/webhooks, multi-tenant billing.
 
 ## Tech stack
 
-- **Frontend:** Vue 3, Vue Router, Vite, TypeScript
-- **Backend API:** FastAPI, SQLAlchemy (async), Alembic
-- **Database:** PostgreSQL
-- **Async processing:** Celery + Celery Beat + Redis
-- **Auth:** JWT access/refresh, email verification (SMTP), Google OAuth
-- **Deployment:** Docker Compose on VPS, Nginx reverse proxy, Let's Encrypt TLS
-- **CI/CD:** GitHub Actions + GHCR images + SSH deploy
+- **Frontend:** Vue 3, Vue Router, Vite, TypeScript  
+- **API:** FastAPI, SQLAlchemy async, Alembic  
+- **Data / jobs:** PostgreSQL, Redis, Celery worker + beat  
+- **Auth:** JWT access/refresh, SMTP, Google OAuth  
+- **Prod:** Docker Compose + **Caddy** (TLS) on shared VPS  
+- **CI/CD:** GitHub Actions → GHCR → optional SSH `deploy/deploy_release.sh`
 
-## Repository structure
+## Repository layout
 
-- `backend/` - API, models, migrations, worker tasks
-- `frontend/` - SPA application
-- `planning-docs/` - roadmap, checklists, environment/deploy runbooks
-- `scripts/` - smoke checks and utility scripts
-- `.github/workflows/` - CI build and deploy automation
-- `starting-doc.txt` - high-level BA/data-design brief
-- `docker-compose.prod.yml` - production compose stack
-- `.env.prod.example` - production env template
+| Path | Role |
+|------|------|
+| `backend/` | API, models, Alembic, Celery |
+| `frontend/` | SPA |
+| `deploy/deploy_release.sh` | Atomic VPS deploy (pull, backup, migrate, health×2, prune) |
+| `docker-compose.prod.yml` | Production stack |
+| `.env.prod.example` / `.env.images.example` | Env templates (secrets vs image tags) |
+| `docs/Planing_docs/moni/` | Macro plan + sprint map |
+| `docs/Implement_docs/Moni_Sprint*/` | Per-sprint BR / decisions / checklist |
+| `docs/Implement_docs/build_history/` | Go-live / release chronicle |
+| `docs/Implement_docs/bug_history.md` | Wave bugs + prevention |
+| `planning-docs/` | Older MVP/runbook docs (see GO-LIVE for current host) |
+| `scripts/` | Local restart, smoke, backup/restore drills |
+| `.github/workflows/` | `deploy.yml` (migrate + build + optional deploy), `e2e-smoke.yml` |
 
-## Architecture overview
+## Architecture (short)
 
-High-level runtime components:
-- **API service** receives user actions and exposes REST endpoints.
-- **Beat scheduler** enqueues due monitor checks.
-- **Worker** executes checks, writes check results, updates monitor snapshot, and handles incident transitions.
-- **Alert flow** sends SMTP notifications and logs alert events.
-- **PostgreSQL** stores source-of-truth data.
-- **Redis** is broker/result backend for Celery tasks.
+1. API accepts monitor config and user actions.  
+2. Beat enqueues due checks; worker runs HTTP probe in `active_region`.  
+3. Results → `check_runs`; status snapshot; open/close incidents; email via outbox.  
+4. Caddy terminates TLS and proxies `/api/*` → `127.0.0.1:8010`, else → `127.0.0.1:4173`.
 
-## Core data model (conceptual)
+## Runtime modes
 
-- `users` - account identity
-- `refresh_tokens` - session continuity/revocation
-- `monitors` - target config + latest snapshot
-- `probe_regions` - allowed region catalog
-- `monitor_regions` - monitor-to-region mapping
-- `check_runs` - immutable check execution history
-- `incidents` - outage lifecycle records
-- `alert_events` - notification audit trail
-- `status_pages` - public/private status page definitions
-- `status_page_monitors` - monitor exposure mapping for each status page
-- `monitor_expiry_status` - SSL/domain expiry snapshots + alert markers
+| Mode | API | Notes |
+|------|-----|--------|
+| **local-process** (default) | `127.0.0.1:8011` | uvicorn + celery + vite |
+| **local-docker** | `127.0.0.1:8010` | full compose |
+| **prod** | `127.0.0.1:8010` behind Caddy | `/opt/moni` on `pinvps01` |
 
-Relationship summary:
-- one user -> many monitors
-- one monitor -> many check runs
-- one monitor -> many incidents
-- one incident -> many alert events
-- one monitor -> many monitor_regions (with one `active_region` on monitor for execution)
-- one status_page -> many status_page_monitors
+SSOT: [`docs/Planing_docs/moni/RUNTIME_MODES.md`](docs/Planing_docs/moni/RUNTIME_MODES.md)
 
-## Data flow
+## Local development
 
-1. User creates/updates a monitor via API.
-2. Beat enqueues check task when monitor is due.
-3. Worker executes check in monitor `active_region` and records `check_runs`.
-4. Worker computes resulting monitor status (`up/down/slow/...`) and updates snapshot fields.
-5. Incident transition logic opens/closes incidents based on status transitions.
-6. Alert task sends email and writes `alert_events`.
-7. Expiry worker updates SSL/domain expiry state and threshold alert tracking.
-8. Frontend reads dashboard/list/detail/runtime endpoints and renders operational state.
-9. Status page endpoints expose selected monitor state publicly when page is public.
-
-## User flow
-
-1. Register or sign in (email/password or Google OAuth).
-2. Create a monitor (name, URL, interval, timeout, thresholds, regions).
-3. Select monitor regions and set one active execution region.
-4. Observe status/region/expiry signals in Dashboard and Monitors list.
-5. Trigger manual run-check when needed.
-6. Investigate detail history (checks/incidents/alerts/chart/region summary).
-7. Create status pages and choose which monitors are publicly exposed.
-8. Receive down/recovered and expiry-related notifications by email.
-
-## Runtime modes (ports)
-
-| Mode | API port | Notes |
-|------|----------|-------|
-| **local-process** (default) | **8011** | uvicorn + celery + vite on host |
-| **local-docker** | **8010** | optional full compose |
-| **prod** (`pinvps01`) | **127.0.0.1:8010** + Caddy | do not retarget GH `VPS_HOST` until smoke |
-
-SSOT: [`docs/Planing_docs/moni/RUNTIME_MODES.md`](docs/Planing_docs/moni/RUNTIME_MODES.md) · VPS prep: [`docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md`](docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md)
-
-Local deps (Postgres + Redis):
+Deps:
 
 ```bash
 docker compose up -d postgres redis
-docker compose exec redis redis-cli ping
 ```
 
-## Local development quickstart
-
-### Backend
+Backend:
 
 ```bash
 cd backend
@@ -134,16 +95,7 @@ py -3 -m alembic upgrade head
 py -3 -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npx vite --host 127.0.0.1 --port 5173 --strictPort
-```
-
-### Worker and scheduler
+Worker / beat (separate terminals):
 
 ```bash
 cd backend
@@ -151,261 +103,100 @@ py -3 -m celery -A app.workers.celery_app worker -P solo -l info
 py -3 -m celery -A app.workers.celery_app beat -l info
 ```
 
-For safer local restarts (avoid duplicate worker/beat):
+Frontend:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\restart_celery_runtime.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\check_celery_runtime.ps1
+```bash
+cd frontend
+npm install
+npx vite --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-For full local restart with port guards (API + Celery + Frontend):
+Guarded Windows restart + smoke:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\restart_full_stack.ps1
-```
-
-Optional flags:
-- `-NoFrontend` restart only backend + celery
-- `-NoCelery` restart only backend + frontend
-- `-NoBackend` restart only frontend + celery
-- `-ForceKillPortOwners` terminate unknown processes holding guarded ports
-
-Recommended strict restart flow (manual, no extra wrapper script):
-1. Preflight:
-   - ensure repo root has `.env`
-   - ensure no stale process is holding API/Frontend ports unexpectedly
-2. Run guarded restart:
-   - `powershell -ExecutionPolicy Bypass -File .\scripts\restart_full_stack.ps1 -ForceKillPortOwners`
-3. Health verification:
-   - open `http://127.0.0.1:8011/api/v1/health` and confirm HTTP 200
-4. Runtime topology verification:
-   - run `powershell -ExecutionPolicy Bypass -File .\scripts\check_celery_runtime.ps1 -Strict -Retries 4 -RetryDelaySeconds 2`
-   - expected: worker and beat are both present, no strict failure
-5. Final readiness:
-   - API docs reachable: `http://127.0.0.1:8011/docs`
-   - frontend reachable (if started): `http://127.0.0.1:5173`
-
-Why this flow is mandatory:
-- `restart_full_stack.ps1` guarantees idempotent stop/start + port guard.
-- `/api/v1/health` confirms API process is actually serving, not just spawned.
-- strict celery check catches false-green starts (e.g., beat crash after spawn).
-- local Windows scripts intentionally avoid Unix pidfile paths for celery beat.
-
-Onboarding copy-paste flows:
-
-Flow A - restart full local stack (API + Celery + Frontend):
-
-```powershell
-# 1) guarded restart (kill unknown port owners if needed)
 powershell -ExecutionPolicy Bypass -File .\scripts\restart_full_stack.ps1 -ForceKillPortOwners
-
-# 2) backend health must be 200
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8011/api/v1/health
-
-# 3) celery topology must be healthy
 powershell -ExecutionPolicy Bypass -File .\scripts\check_celery_runtime.ps1 -Strict -Retries 4 -RetryDelaySeconds 2
-```
-
-Expected result:
-- backend responds `200` at `/api/v1/health`
-- celery check prints worker and beat present, no strict failure
-- frontend reachable at `http://127.0.0.1:5173`
-
-One-command local pre-deploy smoke gate:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke_local_gate.ps1
 ```
 
-Notes:
-- This script runs guarded restart and then runs `scripts/smoke-check.ps1`.
-- For full authenticated smoke (dashboard/monitors/runtime), pass `-AccessToken "<token>"`.
-- Optional monitor-detail/checks/uptime checks remain available in `scripts/smoke-check.ps1` via `-MonitorId`.
-- To skip restart and only run checks: `-SkipRestart`
+## Production on `pinvps01`
 
-Flow B - restart backend + celery only (no frontend):
+- **Domain:** `monitoring1.io.vn` (+ www)  
+- **Dir:** `/opt/moni` (`.env`, `.env.images`, `docker-compose.prod.yml`, `backups/`)  
+- **Proxy:** Caddy append site — keep `monitest.top` block unchanged  
+- **Images:** `ghcr.io/thietvotran324/moni-backend:<sha>` / `moni-frontend:<sha>` (lowercase owner)  
+- **Swap:** 2G recommended before first `compose up` on 3.8 GiB RAM host  
 
-```powershell
-# 1) restart without frontend
-powershell -ExecutionPolicy Bypass -File .\scripts\restart_full_stack.ps1 -NoFrontend -ForceKillPortOwners
+Manual bring-up / verify:
 
-# 2) backend health
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8011/api/v1/health
-
-# 3) celery strict check
-powershell -ExecutionPolicy Bypass -File .\scripts\check_celery_runtime.ps1 -Strict -Retries 4 -RetryDelaySeconds 2
+```bash
+cd /opt/moni
+docker compose --env-file .env --env-file .env.images -f docker-compose.prod.yml ps
+curl -fsS http://127.0.0.1:8010/api/v1/health
+curl -fsS https://monitoring1.io.vn/api/v1/health
 ```
 
-Expected result:
-- backend and celery ready
-- Swagger reachable at `http://127.0.0.1:8011/docs`
-- frontend is intentionally not started in this flow
+Details: [`planning-docs/GO-LIVE-PINVPS01.md`](planning-docs/GO-LIVE-PINVPS01.md) · [`docs/Implement_docs/Moni_Sprint0/dns_caddy_golive.md`](docs/Implement_docs/Moni_Sprint0/dns_caddy_golive.md)
 
-Port note (important):
-- Local guarded runtime defaults API to `8011` (local-process). Do not document `8000` as MONI API.
-- Compose / prod loopback uses API port `8010` (Caddy on `pinvps01`; older Nginx runbooks are historical).
-- If you must run local API on another port, pass `-BackendPort` to `restart_full_stack.ps1`.
-- Full mode table: `docs/Planing_docs/moni/RUNTIME_MODES.md`.
+## CI/CD
 
+Workflow: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
 
-## Production deployment quickstart
+```text
+push main
+  → migrate-smoke (empty Postgres + alembic upgrade head)
+  → build-and-push (GHCR, lowercase image path)
+  → deploy (ONLY if ENABLE_PROD_DEPLOY=true)
+```
 
-1. Complete [`docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md`](docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md) (swap, `/opt/moni`, Caddy note).
-2. Configure `.env` from `.env.prod.example`.
-3. Configure **Caddy** site (hostname TBD) → `127.0.0.1:8010` / `4173` — enable only at go-live gate.
-4. Start compose stack and run migrations.
-5. Verify health endpoint and login flows.
-6. Only then point GitHub Actions `VPS_HOST` at the new machine.
+### Is CD on right now?
 
-See `planning-docs/GO-LIVE-PINVPS01.md` and historical `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (adapt domain/proxy).
+**No — not until you flip the gate.**  
+Deploy is intentionally skipped unless:
 
+1. Repo **Variables:** `ENABLE_PROD_DEPLOY` = `true`  
+2. Repo **Secrets:** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `GHCR_USERNAME`, `GHCR_TOKEN` (optional `VPS_PORT`) pointing at **`pinvps01`**
 
-Production deploy safety note:
-- Deploy workflow now performs migration with:
-  - `docker compose ... up -d api`
-  - `docker compose ... exec -T api alembic upgrade head`
-  - `docker compose ... restart api worker beat`
-- This order prevents "new code / old schema" mismatch after image rollout.
+Until then: every `main` push still runs migrate + build/push images; SSH deploy does not run (workflow stays green).
 
-## Common issues when cloning / modifying / self-deploying
+Notes: [`docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md`](docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md)
 
-### 1) API fails on startup in production
-- Often caused by weak `JWT_SECRET` policy in production.
-- Use a high-entropy secret (32+ chars, no weak keywords like `secret`, `password`, `changeme`).
+After enabling CD, first successful deploy pulls tags into `/opt/moni` via `deploy_release.sh` (backup → migrate → recreate app containers → health×2 → prune).
 
-### 2) Google OAuth save/login errors
-- Ensure callback URL exactly matches env and Google Console.
-- Use correct production domain and HTTPS.
-- Domain reputation (Safe Browsing) can block OAuth config for problematic domains.
-
-### 3) CORS confusion in dev
-- Recommended dev setup uses Vite proxy (`/api`) so `VITE_API_BASE_URL` can stay empty.
-- If calling backend directly from another origin, ensure backend CORS allows that origin.
-
-### 4) "Site is down" for some URLs even though URL is reachable in browser
-- Some targets return `403` to bot-like probes/WAF-blocked traffic.
-- This is often expected target behavior, not necessarily a bug in MONI.
-
-### 5) Redis/Celery mismatches
-- Keep `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` aligned.
-- For internal Docker Redis, use `redis://redis:6379/0`.
-- Celery is intentionally decoupled from API runtime:
-  - `run-check` endpoint only enqueues task (`queued`)
-  - actual execution requires `worker` (and `beat` for scheduled checks)
-  - in local/dev, start `uvicorn + worker + beat` together for full behavior
-- To avoid recurring `queued/pending` caused by duplicated local processes:
-  - always restart Celery via `scripts/restart_celery_runtime.ps1`
-  - verify process count via `scripts/check_celery_runtime.ps1`
-  - keep local Redis/Celery separate from production broker
-
-### 6) Dashboard appears slow even when API is up
-- Root cause seen in local hardening phase: dashboard core endpoints were fast, but runtime health path could be slow/intermittent and block page rendering.
-- Current mitigation:
-  - runtime panel is not in dashboard critical render path
-  - runtime calls use `allSettled` and short TTL cache (health 10s, queue profile 15s)
-  - backend runtime health uses heartbeat-based worker/beat checks with timeout guards
-- Expected behavior now:
-  - dashboard core cards load first
-  - runtime card may refresh slightly later without freezing whole page
-
-### 7) Swagger docs appear blank or unavailable
-- In production, docs are disabled by default with `EXPOSE_DOCS_IN_PRODUCTION=false`.
-- If enabled for temporary testing, ensure API is restarted and `/docs` route is reachable.
-- Docs route uses a dedicated CSP path policy; API routes keep strict CSP hardening.
-
-### 8) Backup script fails with unbound env vars
-- Ensure backup script loads `.env` and references `POSTGRES_USER`/`POSTGRES_DB` from env.
-- Verify compressed backup integrity (`gzip -t`).
-
-## Backup / RPO / RTO (Sprint8)
+## Backup / RPO
 
 | | |
 |--|--|
-| **RPO target** | ≤ 24h (or spacing between deploy dumps) |
-| **RTO** | Measured on restore drill (soft goal ≤ 60 min) |
-| **SSOT** | [`docs/Implement_docs/Moni_Sprint8/RPO_RTO.md`](docs/Implement_docs/Moni_Sprint8/RPO_RTO.md) |
-| **Evidence** | [`docs/Implement_docs/Moni_Sprint8/drill_evidence.md`](docs/Implement_docs/Moni_Sprint8/drill_evidence.md) |
-| **Scripts** | `scripts/backup_pg_dump.ps1` / `.sh`, `restore_pg_drill.ps1` / `.sh`, `drill_smoke.ps1` |
-| **FE e2e** | `cd frontend && npm run e2e:smoke` · CI: `.github/workflows/e2e-smoke.yml` |
+| RPO target | ≤ 24h (or spacing between deploy dumps) |
+| Scripts | `scripts/backup_pg_dump.*`, `restore_pg_drill.*`, `drill_smoke.ps1` |
+| SSOT | [`docs/Implement_docs/Moni_Sprint8/RPO_RTO.md`](docs/Implement_docs/Moni_Sprint8/RPO_RTO.md) |
 
-Restore drills use a **separate** DB `moni_restore_<timestamp>` — never overwrite primary. Keep dumps under `backups/` (gitignored); copy **off-host** for real RPO.
+Restore drills use a **separate** DB name — never overwrite primary. Keep dumps under `backups/` (gitignored); copy off-host for real RPO.
 
-## Planning docs guide
+## Docs map
 
-Use these docs as your onboarding map:
+| Start here | |
+|------------|--|
+| Macro hardening plan | [`docs/Planing_docs/moni/upgrade_hardening_phase_plan.md`](docs/Planing_docs/moni/upgrade_hardening_phase_plan.md) |
+| Sprint map | [`docs/Planing_docs/moni/sprint_map.md`](docs/Planing_docs/moni/sprint_map.md) |
+| Go-live host | [`planning-docs/GO-LIVE-PINVPS01.md`](planning-docs/GO-LIVE-PINVPS01.md) |
+| Build / release history | [`docs/Implement_docs/build_history/`](docs/Implement_docs/build_history/) |
+| Bug history | [`docs/Implement_docs/bug_history.md`](docs/Implement_docs/bug_history.md) |
+| Lesson rules | [`docs/Implement_docs/lessonlearn.md`](docs/Implement_docs/lessonlearn.md) |
+| Env conventions | [`planning-docs/ENV-CONVENTIONS.md`](planning-docs/ENV-CONVENTIONS.md) |
+| Smoke checklist | [`planning-docs/SMOKE-CHECKLIST.md`](planning-docs/SMOKE-CHECKLIST.md) |
+| Older Nginx runbook | `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (**not** for `pinvps01`) |
 
-- `starting-doc.txt`  
-  BA-style product and database-design brief. Start here for product context and system intent.
+## Common pitfalls
 
-- `planning-docs/PROJECT-PLAN.md`  
-  Master roadmap: architecture decisions, milestones, progress tracking, and execution order.
+1. **JWT_SECRET** too weak in production → API refuses to start.  
+2. **Google OAuth** redirect must be exactly `https://monitoring1.io.vn/api/v1/auth/google/callback`.  
+3. **GHCR tags** must be lowercase (`thietvotran324/...`).  
+4. **Alembic ENUM:** do not double-create Postgres types (fixed in `d3e4f5a6b7c8`).  
+5. Celery: API only enqueues; need worker (+ beat for schedule). Prefer `scripts/restart_celery_runtime.ps1` locally.  
+6. Shared VPS: never `compose` against `/opt/pinterest`; only `/opt/moni`.  
+7. TLS right after new Caddy site: wait for ACME “certificate obtained” before declaring failure.
 
-- `planning-docs/M1-DAY-BY-DAY-CHECKLIST.md`  
-  Detailed implementation checklist by day for M1 vertical slice.
+## License / authorship
 
-- `planning-docs/ENV-CONVENTIONS.md`  
-  Environment and URL conventions (dev/prod), OAuth URLs, DB/Redis/Celery config patterns.
-
-- `planning-docs/SMOKE-CHECKLIST.md`  
-  Release confidence checklist: scripted + manual smoke validation.
-
-- `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md`  
-  Older production runbook (Nginx + `x3mphim.click`). Do not use it for `pinvps01`.
-
-- `planning-docs/GO-LIVE-PINVPS01.md`  
-  Current go-live plan: shared VPS, Caddy, loopback ports, RAM limits, and the order of steps.
-
-- `planning-docs/MONITOR-REGION-RESOURCE-SAVING-PLAN.md`  
-  Region execution strategy, active-region rationale, and runtime/port discipline notes.
-
-- `upgrade_planning_docs_1`  
-  Full execution log for the previous upgrade cycle (A1–C1, runtime hardening).
-
-- `docs/Planing_docs/moni/upgrade_hardening_phase_plan.md`  
-  **Current macro plan** for hardening + go-live (context, survey, sprint map H0–H2). Follows `docs/Implement_docs/lessonlearn.md`.
-
-- `docs/Implement_docs/Moni_Sprint0` … `Moni_Sprint12`  
-  Per-sprint planning trio (BR → decisions → checklist). Do not code before Plan #1+#2 are CHỐT.
-
-## Quick access map for new files
-
-If you are onboarding and need the fastest path:
-
-- Start with feature scope/progress:
-  - `docs/Planing_docs/moni/README.md` (current wave)
-  - `docs/Planing_docs/moni/upgrade_hardening_phase_plan.md`
-  - `upgrade_planning_docs_1` (previous wave log)
-  - `planning-docs/MONITOR-REGION-RESOURCE-SAVING-PLAN.md`
-- Then read deploy/runtime operations:
-  - `planning-docs/GO-LIVE-PINVPS01.md` (current shared-VPS plan)
-  - `server-context.md`
-  - `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (older Nginx runbook, not this host)
-  - `.github/workflows/deploy.yml`
-- Then use scripts directly:
-  - `scripts/restart_full_stack.ps1` (guarded local full restart)
-  - `scripts/restart_celery_runtime.ps1` (idempotent local celery restart)
-  - `scripts/check_celery_runtime.ps1` (strict topology check)
-  - `scripts/smoke-check.ps1` (API/frontend smoke checks)
-  - `scripts/smoke_local_gate.ps1` (one-command local pre-deploy gate)
-  - `scripts/smoke_alert_timeline_e2e.py` (incident alert timeline smoke)
-
-## Project status
-
-Core monitoring flow, auth, and deployment baseline are operational.  
-Current priorities are operational robustness (CI discipline, backup/restore confidence, incremental hardening) and controlled feature expansion.
-
-## Upgrade timeline (quick scan)
-
-Use this to understand major completed blocks in execution order:
-
-- **A1:** monitor `accepted_status_codes` end-to-end.
-- **A2:** incident alert policy upgrade (cooldown, still-down reminders, dedup).
-- **A3:** UX hardening for dashboard/detail clarity and empty states.
-- **B1:** status pages (private/public) + maintenance notes.
-- **B2:** SSL/domain expiry monitoring (worker checks, API, summary, alert thresholds).
-- **C1:** region evolution from raw probe tagging to catalog + monitor-region mapping.
-- **Resource-saving region execution:** one `active_region` per monitor check cycle.
-- **Runtime hardening:** heartbeat-based runtime health, queue profile, safer restart discipline.
-- **Deploy hardening:** migration-through-live-api sequence in CI deploy pipeline to prevent code/schema drift.
-
-For full implementation details and test notes, see `upgrade_planning_docs_1`.
+Private project repo. Prefer commits **without** Cursor co-author trailers on `main`.
