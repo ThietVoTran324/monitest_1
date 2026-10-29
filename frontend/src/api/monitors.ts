@@ -5,6 +5,8 @@ const base = import.meta.env.VITE_API_BASE_URL ?? ""
 
 type MonitorStatus = "pending" | "checking" | "up" | "down" | "slow" | "paused"
 
+export type MonitorFreshness = "fresh" | "stale" | "unknown"
+
 export type MonitorItem = {
   id: string
   name: string
@@ -22,6 +24,8 @@ export type MonitorItem = {
   last_failure_at: string | null
   consecutive_failures: number
   created_at: string
+  is_stale: boolean
+  freshness: MonitorFreshness
 }
 
 export type MonitorDetail = MonitorItem & {

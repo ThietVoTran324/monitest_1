@@ -31,6 +31,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - .env.images
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,18 +50,20 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - .env.images
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "--without-gossip", "--without-mingle"]
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "--prefetch-multiplier", "1", "-c", "2", "--without-gossip", "--without-mingle"]
 
   beat:
     image: ${BACKEND_IMAGE}
     restart: unless-stopped
     env_file:
       - .env
+      - .env.images
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +74,8 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE}
     restart: unless-stopped
+    env_file:
+      - .env.images
     depends_on:
       api:
         condition: service_started

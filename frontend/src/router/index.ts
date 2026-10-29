@@ -9,6 +9,8 @@ import MonitorsView from "../views/MonitorsView.vue"
 import MonitorDetailView from "../views/MonitorDetailView.vue"
 import StatusPagesView from "../views/StatusPagesView.vue"
 import PublicStatusPageView from "../views/PublicStatusPageView.vue"
+import AdminEmailOutboxView from "../views/AdminEmailOutboxView.vue"
+import { fetchMe } from "../api/me"
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -23,10 +25,16 @@ const router = createRouter({
     { path: "/monitors/:id", name: "monitor-detail", component: MonitorDetailView, meta: { requiresAuth: true } },
     { path: "/status-pages", name: "status-pages", component: StatusPagesView, meta: { requiresAuth: true } },
     { path: "/status/:slug", name: "public-status-page", component: PublicStatusPageView },
+    {
+      path: "/admin/email-outbox",
+      name: "admin-email-outbox",
+      component: AdminEmailOutboxView,
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const normalizedPath = to.path.replace(/^\/{2,}/, "/")
   if (normalizedPath !== to.path) {
     return { path: normalizedPath, query: to.query, hash: to.hash, replace: true }
@@ -38,6 +46,14 @@ router.beforeEach((to) => {
   }
   if (to.meta.guestOnly && token) {
     return { path: "/dashboard" }
+  }
+  if (to.meta.requiresAdmin) {
+    try {
+      const me = await fetchMe()
+      if (!me.is_admin) return { path: "/dashboard" }
+    } catch {
+      return { path: "/login" }
+    }
   }
   return true
 })

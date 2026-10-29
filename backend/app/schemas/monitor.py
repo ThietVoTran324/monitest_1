@@ -61,6 +61,8 @@ class MonitorListItem(BaseModel):
     last_failure_at: datetime | None = None
     consecutive_failures: int = 0
     created_at: datetime
+    is_stale: bool = False
+    freshness: str = "unknown"
 
 
 class MonitorDetailResponse(BaseModel):
@@ -87,6 +89,8 @@ class MonitorDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
+    is_stale: bool = False
+    freshness: str = "unknown"
 
 
 class MonitorListResponse(BaseModel):
@@ -159,6 +163,7 @@ class DashboardSummaryResponse(BaseModel):
     checking: int
     slow: int
     paused: int
+    stale: int = 0
     avg_response_time_ms: float | None
     uptime_window_from: datetime | None = None
     uptime_window_to: datetime | None = None

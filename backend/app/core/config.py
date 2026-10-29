@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     celery_broker_heartbeat_seconds: int = 30
     celery_broker_health_check_interval_seconds: int = 30
     celery_worker_prefetch_multiplier: int = 1
+    # Redis: disable prefetch so a slow check cannot reserve a batch (e.g. 12–16) ahead.
+    celery_worker_disable_prefetch: bool = True
+    celery_task_acks_late: bool = True
     celery_broker_retry_on_startup: bool = True
 
     jwt_secret: str
@@ -50,14 +53,27 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 10
     alert_still_down_reminder_minutes: int = 30
     alert_max_reminders_per_incident: int = 24
+    # Email outbox (global; monitors may override)
+    email_outbox_max_attempts: int = 5
+    email_outbox_backoff_seconds: str = "60,300,900"
+    email_outbox_batch_size: int = 20
     runtime_beat_stale_seconds: int = 120
     auth_rate_limit_window_seconds: int = 60
     auth_rate_limit_max_attempts: int = 10
+    public_status_rate_limit_window_seconds: int = 60
+    public_status_rate_limit_max_attempts: int = 60
     enforce_https_redirect: bool = False
     expose_docs_in_production: bool = False
     allow_insecure_dev_mode_on_public: bool = False
     enforce_strong_jwt_secret_in_production: bool = True
     jwt_secret_min_length: int = 32
+    # Probe / SSRF guards (env: SSRF_MAX_REDIRECTS, SSRF_MAX_RESPONSE_BYTES)
+    ssrf_max_redirects: int = 5
+    # Default 5 MiB — heavy HTML (e.g. YouTube watch ~1.3MiB+) must fit; still caps RAM.
+    ssrf_max_response_bytes: int = 5_242_880
+    # Freshness (env: MONITOR_STALE_FACTOR, MONITOR_STALE_MIN_BUFFER_SECONDS)
+    monitor_stale_factor: float = 2.0
+    monitor_stale_min_buffer_seconds: int = 60
 
     @property
     def database_url_sync(self) -> str:

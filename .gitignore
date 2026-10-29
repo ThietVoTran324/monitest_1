@@ -20,3 +20,17 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Prod image tags written by deploy (not secrets, but host-local)
+.env.images
+
+# DB backups / restore drills (Sprint8) — never commit dumps
+backups/
+*.sql.gz
+/opt/moni/backups/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.cache/

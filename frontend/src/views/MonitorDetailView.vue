@@ -527,7 +527,11 @@ onUnmounted(() => {
       <p><strong>Accepted HTTP codes:</strong> <code>{{ monitor.accepted_status_codes }}</code></p>
       <p><strong>Regions:</strong> <code>{{ monitor.probe_regions.join(", ") }}</code></p>
       <p><strong>Active region:</strong> <code>{{ monitor.active_region }}</code></p>
-      <p><strong>Status:</strong> <UiBadge :tone="checkStatusTone(monitor.current_status)">● {{ monitor.current_status }}</UiBadge></p>
+      <p><strong>Status:</strong>
+        <UiBadge :tone="checkStatusTone(monitor.current_status)">● {{ monitor.current_status }}</UiBadge>
+        <UiBadge v-if="monitor.is_stale" tone="warning">Stale</UiBadge>
+        <small v-else-if="monitor.freshness === 'unknown'" class="muted"> · freshness unknown</small>
+      </p>
       <p><strong>Last checked:</strong> {{ fmtDateTime(monitor.last_checked_at) }}</p>
       <p><strong>Last success:</strong> {{ fmtDateTime(monitor.last_success_at) }}</p>
       <p><strong>Last error:</strong> {{ monitor.last_error_message ?? "n/a" }}</p>

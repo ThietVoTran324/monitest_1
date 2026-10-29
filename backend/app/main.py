@@ -109,6 +109,7 @@ async def api_http_exception(_: Request, exc: HTTPException) -> JSONResponse:
             "code": code,
             "message": _message_from_detail(detail, fallback=f"HTTP {status_code}"),
         },
+        headers=dict(exc.headers) if exc.headers else None,
     )
 
 

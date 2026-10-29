@@ -10,7 +10,9 @@ from app.core.database import AsyncSessionLocal, engine
 from app.models.monitor import Monitor
 from app.models.monitor_expiry import MonitorExpiryStatus
 from app.workers.celery_app import celery_app
-from app.workers.tasks.notify import send_incident_email
+from app.models.user import User
+from app.services.email_outbox_service import enqueue_alert_outbox
+from app.workers.tasks.notify import process_email_outbox
 
 EXPIRY_ALERT_THRESHOLDS = (30, 14, 7, 1)
 
@@ -206,10 +208,20 @@ async def _check_monitor_expiry_async(monitor_id: str) -> None:
             ):
                 sent_ssl_thresholds.clear()
 
+            queued = 0
+            user = await session.get(User, monitor.user_id)
             threshold = _next_threshold_to_alert(ssl_days_left, sent_ssl_thresholds)
-            if threshold is not None:
-                send_incident_email.delay(str(monitor.id), None, "ssl_expiry_warning")
+            if threshold is not None and user is not None:
+                await enqueue_alert_outbox(
+                    session,
+                    monitor=monitor,
+                    user=user,
+                    incident_id=None,
+                    event_type="ssl_expiry_warning",
+                    now=now,
+                )
                 sent_ssl_thresholds.add(threshold)
+                queued += 1
 
             if (
                 previous_domain_expires_at is not None
@@ -218,9 +230,17 @@ async def _check_monitor_expiry_async(monitor_id: str) -> None:
             ):
                 sent_domain_thresholds.clear()
             domain_threshold = _next_threshold_to_alert(domain_days_left, sent_domain_thresholds)
-            if domain_threshold is not None:
-                send_incident_email.delay(str(monitor.id), None, "domain_expiry_warning")
+            if domain_threshold is not None and user is not None:
+                await enqueue_alert_outbox(
+                    session,
+                    monitor=monitor,
+                    user=user,
+                    incident_id=None,
+                    event_type="domain_expiry_warning",
+                    now=now,
+                )
                 sent_domain_thresholds.add(domain_threshold)
+                queued += 1
 
             status.ssl_expires_at = ssl_expires_at
             status.ssl_days_left = ssl_days_left
@@ -233,5 +253,7 @@ async def _check_monitor_expiry_async(monitor_id: str) -> None:
             status.last_checked_at = now
             status.last_error = last_error
             await session.commit()
+            if queued:
+                process_email_outbox.delay()
     finally:
         await engine.dispose()

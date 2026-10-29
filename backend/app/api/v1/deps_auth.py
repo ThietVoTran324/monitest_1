@@ -17,3 +17,9 @@ async def get_current_user(
         return await auth.get_user_by_token(session, creds.credentials)
     except auth.AuthError as e:
         raise HTTPException(status_code=e.status, detail=e.message) from e
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="admin_required")
+    return user

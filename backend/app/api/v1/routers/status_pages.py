@@ -1,19 +1,22 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps_auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import public_status_rate_limiter
 from app.models.monitor import Incident, Monitor
 from app.models.status_page import StatusPage, StatusPageMonitor
 from app.models.user import User
 from app.schemas.status_page import (
+    PublicStatusPageIncidentItem,
+    PublicStatusPageMonitorItem,
     PublicStatusPageResponse,
     StatusPageCreateRequest,
-    StatusPageIncidentItem,
     StatusPageMonitorItem,
     StatusPageResponse,
     StatusPageUpdateRequest,
@@ -34,6 +37,16 @@ def _monitor_item(m: Monitor) -> StatusPageMonitorItem:
     )
 
 
+def _public_monitor_item(m: Monitor) -> PublicStatusPageMonitorItem:
+    return PublicStatusPageMonitorItem(
+        id=m.id,
+        name=m.name,
+        current_status=m.current_status,
+        last_checked_at=m.last_checked_at,
+        last_response_time_ms=m.last_response_time_ms,
+    )
+
+
 async def _load_monitors_for_page(session: AsyncSession, page_id: uuid.UUID) -> list[Monitor]:
     rows = await session.execute(
         select(Monitor)
@@ -41,7 +54,7 @@ async def _load_monitors_for_page(session: AsyncSession, page_id: uuid.UUID) -> 
         .where(StatusPageMonitor.status_page_id == page_id, Monitor.deleted_at.is_(None))
         .order_by(Monitor.created_at.desc())
     )
-    return rows.scalars().all()
+    return list(rows.scalars().all())
 
 
 async def _require_owned_page(session: AsyncSession, user_id: uuid.UUID, page_id: uuid.UUID) -> StatusPage:
@@ -78,6 +91,24 @@ async def _set_page_monitors(session: AsyncSession, page_id: uuid.UUID, monitor_
     if monitor_ids:
         session.add_all(
             [StatusPageMonitor(status_page_id=page_id, monitor_id=mid) for mid in dict.fromkeys(monitor_ids)]
+        )
+
+
+def _enforce_public_status_rate_limit(request: Request) -> None:
+    client_ip = request.client.host if request.client else "unknown"
+    result = public_status_rate_limiter.allow(
+        key=f"public_status:{client_ip}",
+        max_attempts=settings.public_status_rate_limit_max_attempts,
+        window_seconds=settings.public_status_rate_limit_window_seconds,
+    )
+    if not result.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "rate_limited",
+                "message": "Too many public status page requests. Retry later.",
+            },
+            headers={"Retry-After": str(result.retry_after_seconds)},
         )
 
 
@@ -199,16 +230,18 @@ async def delete_status_page(
 @public_router.get("/{slug}", response_model=PublicStatusPageResponse)
 async def get_public_status_page(
     slug: str,
+    request: Request,
     incident_limit: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_db),
 ) -> PublicStatusPageResponse:
+    _enforce_public_status_rate_limit(request)
     row = await session.execute(select(StatusPage).where(StatusPage.slug == slug))
     page = row.scalar_one_or_none()
     if page is None or not page.is_public:
         raise HTTPException(status_code=404, detail="Status page not found")
     monitors = await _load_monitors_for_page(session, page.id)
     monitor_ids = [m.id for m in monitors]
-    incidents: list[StatusPageIncidentItem] = []
+    incidents: list[PublicStatusPageIncidentItem] = []
     if monitor_ids:
         inc_rows = await session.execute(
             select(Incident)
@@ -217,14 +250,12 @@ async def get_public_status_page(
             .limit(incident_limit)
         )
         incidents = [
-            StatusPageIncidentItem(
+            PublicStatusPageIncidentItem(
                 id=i.id,
                 monitor_id=i.monitor_id,
                 status=i.status.value,
                 opened_at=i.opened_at,
                 closed_at=i.closed_at,
-                open_reason=i.open_reason,
-                close_reason=i.close_reason,
             )
             for i in inc_rows.scalars().all()
         ]
@@ -232,7 +263,7 @@ async def get_public_status_page(
         name=page.name,
         slug=page.slug,
         maintenance_notes=page.maintenance_notes,
-        monitors=[_monitor_item(m) for m in monitors],
+        monitors=[_public_monitor_item(m) for m in monitors],
         incidents=incidents,
         generated_at=datetime.now(UTC),
     )

@@ -468,7 +468,10 @@ onUnmounted(() => {
   <div class="page">
     <h1>Monitors</h1>
     <UiCard v-if="runtimeHealth && runtimeHealth.status !== 'ok'">
-      <UiPanelHeader title="Runtime Degraded" subtitle="Redis/Celery khong on dinh, run-check co the bi tre" />
+      <UiPanelHeader
+        title="Runtime Degraded"
+        subtitle="Pipeline (Redis/Celery) unhealthy — run-check may be delayed. Not the same as website DOWN."
+      />
       <p class="err">{{ runtimeHealth.degraded_reasons.join(", ") }}</p>
     </UiCard>
 
@@ -600,7 +603,10 @@ onUnmounted(() => {
               </table>
               <label><input v-model="editForm.is_paused" type="checkbox" /> paused</label>
             </td>
-            <td><UiBadge :tone="statusTone(m.current_status)">● {{ m.current_status }}</UiBadge></td>
+            <td class="status-cell">
+              <UiBadge :tone="statusTone(m.current_status)">● {{ m.current_status }}</UiBadge>
+              <UiBadge v-if="m.is_stale" tone="warning">Stale</UiBadge>
+            </td>
             <td>{{ m.last_response_time_ms ?? "n/a" }}</td>
             <td>
               <span v-if="m.consecutive_failures > 0" class="risk">

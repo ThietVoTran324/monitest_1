@@ -42,7 +42,7 @@ Start-Process `
   -FilePath "py" `
   -ArgumentList @(
     "-3", "-m", "celery", "-A", "app.workers.celery_app",
-    "worker", "-P", "solo", "-l", "info", "--without-gossip", "--without-mingle"
+    "worker", "-P", "solo", "-c", "1", "--prefetch-multiplier", "1", "-l", "info", "--without-gossip", "--without-mingle"
   ) `
   -WorkingDirectory $backendDir
 

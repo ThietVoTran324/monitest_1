@@ -26,6 +26,9 @@ celery_app.conf.update(
     broker_heartbeat=settings.celery_broker_heartbeat_seconds,
     broker_connection_retry_on_startup=settings.celery_broker_retry_on_startup,
     worker_prefetch_multiplier=settings.celery_worker_prefetch_multiplier,
+    worker_disable_prefetch=settings.celery_worker_disable_prefetch,
+    task_acks_late=settings.celery_task_acks_late,
+    task_reject_on_worker_lost=True,
     broker_transport_options={
         "health_check_interval": settings.celery_broker_health_check_interval_seconds,
     },
@@ -43,5 +46,9 @@ celery_app.conf.beat_schedule = {
     "check-expiry-status": {
         "task": "app.workers.tasks.expiry.check_expiry_for_all_http_monitors",
         "schedule": crontab(minute="*/30"),
+    },
+    "process-email-outbox": {
+        "task": "app.workers.tasks.notify.process_email_outbox",
+        "schedule": 30.0,
     },
 }

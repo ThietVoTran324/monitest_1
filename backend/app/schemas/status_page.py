@@ -31,6 +31,14 @@ class StatusPageMonitorItem(BaseModel):
     last_response_time_ms: int | None
 
 
+class PublicStatusPageMonitorItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    current_status: MonitorStatus
+    last_checked_at: datetime | None
+    last_response_time_ms: int | None
+
+
 class StatusPageIncidentItem(BaseModel):
     id: uuid.UUID
     monitor_id: uuid.UUID
@@ -39,6 +47,14 @@ class StatusPageIncidentItem(BaseModel):
     closed_at: datetime | None
     open_reason: str | None
     close_reason: str | None
+
+
+class PublicStatusPageIncidentItem(BaseModel):
+    id: uuid.UUID
+    monitor_id: uuid.UUID
+    status: str
+    opened_at: datetime
+    closed_at: datetime | None
 
 
 class StatusPageResponse(BaseModel):
@@ -57,6 +73,6 @@ class PublicStatusPageResponse(BaseModel):
     name: str
     slug: str
     maintenance_notes: str | None
-    monitors: list[StatusPageMonitorItem]
-    incidents: list[StatusPageIncidentItem]
+    monitors: list[PublicStatusPageMonitorItem]
+    incidents: list[PublicStatusPageIncidentItem]
     generated_at: datetime

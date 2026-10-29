@@ -12,6 +12,7 @@ export type DashboardSummary = {
   checking: number
   slow: number
   paused: number
+  stale: number
   avg_response_time_ms: number | null
   uptime_window_from: string | null
   uptime_window_to: string | null

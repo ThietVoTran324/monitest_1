@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { onMounted, ref } from "vue"
 import { RouterLink, useRouter } from "vue-router"
 import { logout } from "../api/auth"
+import { fetchMe } from "../api/me"
 
 const router = useRouter()
 const loggingOut = ref(false)
 const logoutErr = ref<string | null>(null)
+const isAdmin = ref(false)
+
+onMounted(async () => {
+  try {
+    const me = await fetchMe()
+    isAdmin.value = !!me.is_admin
+  } catch {
+    isAdmin.value = false
+  }
+})
 
 async function handleLogout() {
   logoutErr.value = null
@@ -29,6 +40,7 @@ async function handleLogout() {
         <RouterLink to="/dashboard">Dashboard</RouterLink>
         <RouterLink to="/monitors">Monitors</RouterLink>
         <RouterLink to="/status-pages">Status Pages</RouterLink>
+        <RouterLink v-if="isAdmin" to="/admin/email-outbox">Admin outbox</RouterLink>
       </nav>
       <button type="button" class="signout" @click="handleLogout" :disabled="loggingOut">
         {{ loggingOut ? "…" : "Sign out" }}

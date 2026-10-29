@@ -19,7 +19,16 @@ Recommended reading order:
 - `12) Architecture decisions`
 - `13+) Progress, gap checks, and next execution order`
 
-## Project snapshot (executive summary)
+## Project snapshot (as of 2026-10-26)
+
+- Product shape: uptime-style website monitoring app, optimized for correctness and operational stability.
+- Code status: upgrade cycle is implemented (accepted status codes, alert policy, status pages, SSL/domain expiry, region catalog + `active_region`, runtime health). See `upgrade_planning_docs_1` and the README upgrade timeline.
+- Not shipped: TCP/ICMP execution, real multi-location probe agents, WebSocket, non-email alert channels.
+- Next execution: go-live on shared VPS `pinvps01`. Current source of truth is `planning-docs/GO-LIVE-PINVPS01.md` and `server-context.md`.
+- That VPS already serves `monitest.top` from `/opt/pinterest` behind Caddy. MONI is a second site, loopback ports `8010` and `4173`, directory `/opt/moni`. The hostname for MONI is not chosen yet.
+- Historical snapshot below this section describes the earlier MVP baseline. Local API for day-to-day Windows dev is `8011`; compose production stays on `8010`.
+
+## Project snapshot (executive summary, historical baseline)
 
 - Product shape: uptime-style website monitoring app, optimized for correctness and operational stability.
 - Current baseline:
@@ -76,9 +85,10 @@ Priority is correctness, reliability, and operability over feature breadth.
 - Vite proxy (`/api` -> backend) works in dev to avoid CORS friction.
 
 ### Local environment
-- Backend dev default: `127.0.0.1:8010`
+- Backend local-process default: `127.0.0.1:8011` (compose/prod loopback `8010`)
 - Frontend dev default: `127.0.0.1:5173`
-- `.env` Google callback aligned to `http://localhost:8010/api/v1/auth/google/callback`
+- `.env` Google callback aligned to `http://localhost:8011/api/v1/auth/google/callback`
+- Modes SSOT: `docs/Planing_docs/moni/RUNTIME_MODES.md`
 
 ## 3) MVP scope (remaining / fixed)
 
@@ -315,7 +325,7 @@ Note:
    - `cd backend`
    - `py -3 -m pip install -e ".[dev]"`
    - `py -3 -m alembic upgrade head`
-   - `py -3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8010`
+   - `py -3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8011`
 
 2. Frontend:
    - `cd frontend`

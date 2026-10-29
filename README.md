@@ -1,7 +1,7 @@
 # MONI
 
-**Live deployment:** [https://monitest.top](https://monitest.top)  
-**API health check:** [https://monitest.top/api/v1/health](https://monitest.top/api/v1/health)
+**Go-live target:** shared VPS `pinvps01` (see `server-context.md` and `planning-docs/GO-LIVE-PINVPS01.md`).  
+`monitest.top` on that machine is a different app in `/opt/pinterest`. MONI is not deployed there yet, and its public hostname is not chosen.
 
 MONI is an uptime-style monitoring system focused on reliable website checks, clear incident state transitions, and practical operational workflows.
 
@@ -106,6 +106,23 @@ Relationship summary:
 7. Create status pages and choose which monitors are publicly exposed.
 8. Receive down/recovered and expiry-related notifications by email.
 
+## Runtime modes (ports)
+
+| Mode | API port | Notes |
+|------|----------|-------|
+| **local-process** (default) | **8011** | uvicorn + celery + vite on host |
+| **local-docker** | **8010** | optional full compose |
+| **prod** (`pinvps01`) | **127.0.0.1:8010** + Caddy | do not retarget GH `VPS_HOST` until smoke |
+
+SSOT: [`docs/Planing_docs/moni/RUNTIME_MODES.md`](docs/Planing_docs/moni/RUNTIME_MODES.md) · VPS prep: [`docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md`](docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md)
+
+Local deps (Postgres + Redis):
+
+```bash
+docker compose up -d postgres redis
+docker compose exec redis redis-cli ping
+```
+
 ## Local development quickstart
 
 ### Backend
@@ -116,6 +133,7 @@ py -3 -m pip install -e ".[dev]"
 py -3 -m alembic upgrade head
 py -3 -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
+
 
 ### Frontend
 
@@ -224,20 +242,23 @@ Expected result:
 - frontend is intentionally not started in this flow
 
 Port note (important):
-- Local guarded runtime defaults API to `8011` for stability on Windows dev.
-- Production deploy stack continues using API port `8010` behind Nginx/compose.
+- Local guarded runtime defaults API to `8011` (local-process). Do not document `8000` as MONI API.
+- Compose / prod loopback uses API port `8010` (Caddy on `pinvps01`; older Nginx runbooks are historical).
 - If you must run local API on another port, pass `-BackendPort` to `restart_full_stack.ps1`.
+- Full mode table: `docs/Planing_docs/moni/RUNTIME_MODES.md`.
+
 
 ## Production deployment quickstart
 
-1. Prepare VPS folders (`/opt/moni`, `/opt/moni/backups`).
+1. Complete [`docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md`](docs/Implement_docs/Moni_Sprint0/vps_prep_checklist.md) (swap, `/opt/moni`, Caddy note).
 2. Configure `.env` from `.env.prod.example`.
-3. Configure Nginx site and issue TLS certificate.
+3. Configure **Caddy** site (hostname TBD) → `127.0.0.1:8010` / `4173` — enable only at go-live gate.
 4. Start compose stack and run migrations.
 5. Verify health endpoint and login flows.
-6. Configure GitHub Actions secrets for CI deploy.
+6. Only then point GitHub Actions `VPS_HOST` at the new machine.
 
-See detailed runbook in `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (adapt domain values if needed).
+See `planning-docs/GO-LIVE-PINVPS01.md` and historical `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (adapt domain/proxy).
+
 
 Production deploy safety note:
 - Deploy workflow now performs migration with:
@@ -296,6 +317,19 @@ Production deploy safety note:
 - Ensure backup script loads `.env` and references `POSTGRES_USER`/`POSTGRES_DB` from env.
 - Verify compressed backup integrity (`gzip -t`).
 
+## Backup / RPO / RTO (Sprint8)
+
+| | |
+|--|--|
+| **RPO target** | ≤ 24h (or spacing between deploy dumps) |
+| **RTO** | Measured on restore drill (soft goal ≤ 60 min) |
+| **SSOT** | [`docs/Implement_docs/Moni_Sprint8/RPO_RTO.md`](docs/Implement_docs/Moni_Sprint8/RPO_RTO.md) |
+| **Evidence** | [`docs/Implement_docs/Moni_Sprint8/drill_evidence.md`](docs/Implement_docs/Moni_Sprint8/drill_evidence.md) |
+| **Scripts** | `scripts/backup_pg_dump.ps1` / `.sh`, `restore_pg_drill.ps1` / `.sh`, `drill_smoke.ps1` |
+| **FE e2e** | `cd frontend && npm run e2e:smoke` · CI: `.github/workflows/e2e-smoke.yml` |
+
+Restore drills use a **separate** DB `moni_restore_<timestamp>` — never overwrite primary. Keep dumps under `backups/` (gitignored); copy **off-host** for real RPO.
+
 ## Planning docs guide
 
 Use these docs as your onboarding map:
@@ -316,23 +350,36 @@ Use these docs as your onboarding map:
   Release confidence checklist: scripted + manual smoke validation.
 
 - `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md`  
-  Production deploy and rollback workflow on VPS with Nginx + Docker Compose + GH Actions.
+  Older production runbook (Nginx + `x3mphim.click`). Do not use it for `pinvps01`.
+
+- `planning-docs/GO-LIVE-PINVPS01.md`  
+  Current go-live plan: shared VPS, Caddy, loopback ports, RAM limits, and the order of steps.
 
 - `planning-docs/MONITOR-REGION-RESOURCE-SAVING-PLAN.md`  
   Region execution strategy, active-region rationale, and runtime/port discipline notes.
 
 - `upgrade_planning_docs_1`  
-  Full execution log for this upgrade cycle (what was done, test checkpoints, and remaining/closed items).
+  Full execution log for the previous upgrade cycle (A1–C1, runtime hardening).
+
+- `docs/Planing_docs/moni/upgrade_hardening_phase_plan.md`  
+  **Current macro plan** for hardening + go-live (context, survey, sprint map H0–H2). Follows `docs/Implement_docs/lessonlearn.md`.
+
+- `docs/Implement_docs/Moni_Sprint0` … `Moni_Sprint12`  
+  Per-sprint planning trio (BR → decisions → checklist). Do not code before Plan #1+#2 are CHỐT.
 
 ## Quick access map for new files
 
 If you are onboarding and need the fastest path:
 
 - Start with feature scope/progress:
-  - `upgrade_planning_docs_1`
+  - `docs/Planing_docs/moni/README.md` (current wave)
+  - `docs/Planing_docs/moni/upgrade_hardening_phase_plan.md`
+  - `upgrade_planning_docs_1` (previous wave log)
   - `planning-docs/MONITOR-REGION-RESOURCE-SAVING-PLAN.md`
 - Then read deploy/runtime operations:
-  - `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md`
+  - `planning-docs/GO-LIVE-PINVPS01.md` (current shared-VPS plan)
+  - `server-context.md`
+  - `planning-docs/DEPLOY-RUNBOOK-X3MPHIM.md` (older Nginx runbook, not this host)
   - `.github/workflows/deploy.yml`
 - Then use scripts directly:
   - `scripts/restart_full_stack.ps1` (guarded local full restart)

@@ -1,12 +1,12 @@
 import uuid
 from datetime import UTC, datetime, timedelta
-from ipaddress import ip_address
 
 from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.monitor import CheckRun, CheckRunStatus, Monitor, MonitorRegion, MonitorStatus
 from app.models.probe_region import ProbeRegion
+from app.security.ssrf import validate_url_for_ssrf
 
 
 class MonitorValidationError(Exception):
@@ -135,17 +135,10 @@ def is_status_code_accepted(status_code: int, accepted_status_codes: str) -> boo
 
 
 def validate_monitor_url_host(url: str) -> None:
-    host = url.split("://", 1)[-1].split("/", 1)[0].split("@")[-1].split(":")[0].strip().lower()
-    if not host:
-        raise MonitorValidationError("invalid monitor url host")
-    if host in {"localhost"} or host.endswith(".local"):
-        raise MonitorValidationError("local/internal hosts are not allowed")
     try:
-        ip = ip_address(host)
-    except ValueError:
-        return
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
-        raise MonitorValidationError("private/internal IP targets are not allowed")
+        validate_url_for_ssrf(url)
+    except ValueError as exc:
+        raise MonitorValidationError(str(exc)) from exc
 
 
 def enforce_run_check_rate_limit(

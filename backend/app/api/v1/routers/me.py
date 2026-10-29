@@ -7,5 +7,5 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 
 @router.get("")
-async def read_me(user: User = Depends(get_current_user)) -> dict[str, str]:
-    return {"id": str(user.id), "email": user.email}
+async def read_me(user: User = Depends(get_current_user)) -> dict:
+    return {"id": str(user.id), "email": user.email, "is_admin": bool(user.is_admin)}

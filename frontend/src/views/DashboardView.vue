@@ -154,7 +154,10 @@ onUnmounted(() => {
     <div class="page">
     <h1>Dashboard</h1>
     <UiCard v-if="runtimeHealth && runtimeHealth.status !== 'ok'" class="runtime-alert">
-      <UiPanelHeader title="Runtime Degraded" subtitle="Worker/beat/Redis khong on dinh, check tasks co the bi tre" />
+      <UiPanelHeader
+        title="Runtime Degraded"
+        subtitle="Pipeline (worker/beat/Redis) unhealthy — checks may be delayed. This is not the same as website DOWN."
+      />
       <p class="err">
         {{ runtimeHealth.degraded_reasons.join(", ") }}
       </p>
@@ -185,6 +188,7 @@ onUnmounted(() => {
       <UiCard compact class="card"><strong>Total</strong><span>{{ summary.total_monitors }}</span></UiCard>
       <UiCard compact class="card"><strong>UP</strong><span>{{ summary.up }}</span></UiCard>
       <UiCard compact class="card"><strong>DOWN</strong><span>{{ summary.down }}</span></UiCard>
+      <UiCard compact class="card"><strong>STALE</strong><span>{{ summary.stale }}</span></UiCard>
       <UiCard compact class="card"><strong>PENDING</strong><span>{{ summary.pending }}</span></UiCard>
       <UiCard compact class="card"><strong>AVG ms</strong><span>{{ fmtAvgMs(summary.avg_response_time_ms) }}</span></UiCard>
       <UiCard compact class="card">
@@ -262,6 +266,7 @@ onUnmounted(() => {
         <li v-for="m in recentMonitors" :key="m.id">
           <RouterLink :to="`/monitors/${m.id}`">{{ m.name }}</RouterLink>
           <UiBadge :tone="statusTone(m.current_status)">● {{ m.current_status }}</UiBadge>
+          <UiBadge v-if="m.is_stale" tone="warning">Stale</UiBadge>
           <small class="muted">· {{ riskText(m.consecutive_failures) }}</small>
         </li>
       </ul>
@@ -273,6 +278,7 @@ onUnmounted(() => {
         <li v-for="m in recentFailures" :key="m.id">
           <RouterLink :to="`/monitors/${m.id}`">{{ m.name }}</RouterLink>
           <UiBadge :tone="statusTone(m.current_status)">● {{ m.current_status }}</UiBadge>
+          <UiBadge v-if="m.is_stale" tone="warning">Stale</UiBadge>
           <small class="muted">
             · {{ riskText(m.consecutive_failures) }}
             <span v-if="m.last_failure_at"> since {{ fmtIso(m.last_failure_at) }}</span>

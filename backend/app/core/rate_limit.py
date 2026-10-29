@@ -30,3 +30,4 @@ class InMemoryRateLimiter:
 
 
 auth_rate_limiter = InMemoryRateLimiter()
+public_status_rate_limiter = InMemoryRateLimiter()

@@ -14,6 +14,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     google_sub: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
 
     email_verify_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

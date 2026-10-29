@@ -204,6 +204,30 @@ async def test_monitor_create_rejects_internal_targets() -> None:
         assert blocked_private_ip.status_code == 400
         assert "private/internal IP" in blocked_private_ip.json()["message"]
 
+        blocked_userinfo = await client.post(
+            "/api/v1/monitors",
+            json={
+                "name": "it-ssrf-userinfo",
+                "url": "https://user:pass@example.com/",
+                "interval_seconds": 60,
+                "timeout_seconds": 10,
+            },
+        )
+        assert blocked_userinfo.status_code == 400
+        assert "embedded credentials" in blocked_userinfo.json()["message"]
+
+        # Schema (HttpUrl) rejects non-http(s) before service SSRF guard.
+        blocked_scheme = await client.post(
+            "/api/v1/monitors",
+            json={
+                "name": "it-ssrf-ftp",
+                "url": "ftp://example.com/file",
+                "interval_seconds": 60,
+                "timeout_seconds": 10,
+            },
+        )
+        assert blocked_scheme.status_code == 422
+
         invalid_codes = await client.post(
             "/api/v1/monitors",
             json={

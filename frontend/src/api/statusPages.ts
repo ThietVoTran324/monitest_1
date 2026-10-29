@@ -12,6 +12,15 @@ export type StatusPageMonitor = {
   last_response_time_ms: number | null
 }
 
+/** Public surface — no monitor URL (Sprint10 privacy). */
+export type PublicStatusPageMonitor = {
+  id: string
+  name: string
+  current_status: "pending" | "checking" | "up" | "down" | "slow" | "paused"
+  last_checked_at: string | null
+  last_response_time_ms: number | null
+}
+
 export type StatusPageIncident = {
   id: string
   monitor_id: string
@@ -20,6 +29,14 @@ export type StatusPageIncident = {
   closed_at: string | null
   open_reason: string | null
   close_reason: string | null
+}
+
+export type PublicStatusPageIncident = {
+  id: string
+  monitor_id: string
+  status: string
+  opened_at: string
+  closed_at: string | null
 }
 
 export type StatusPage = {
@@ -38,8 +55,8 @@ export type PublicStatusPage = {
   name: string
   slug: string
   maintenance_notes: string | null
-  monitors: StatusPageMonitor[]
-  incidents: StatusPageIncident[]
+  monitors: PublicStatusPageMonitor[]
+  incidents: PublicStatusPageIncident[]
   generated_at: string
 }
 
@@ -95,6 +112,9 @@ export async function getPublicStatusPage(slug: string): Promise<PublicStatusPag
     const data = await readJsonError(res)
     if (res.status === 404) {
       throw new Error("Status page not found or you do not have permission to view this page.")
+    }
+    if (res.status === 429) {
+      throw new Error("Too many requests. Please retry shortly.")
     }
     throw new Error(errMsg(data, `${res.status} ${res.statusText}`))
   }

@@ -1,3 +1,4 @@
+# Local-process default API = 8011. Docker/prod loopback = 8010 (see docs/Planing_docs/moni/RUNTIME_MODES.md).
 Param(
   [switch]$NoFrontend,
   [switch]$NoBackend,
@@ -110,7 +111,7 @@ if (-not $NoBackend) {
   Write-Host ("[restart] backend started on 127.0.0.1:{0}" -f $backendPort)
 }
 if (-not $NoCelery) {
-  Start-Process -FilePath "py" -ArgumentList @("-3", "-m", "celery", "-A", "app.workers.celery_app", "worker", "-P", "solo", "-l", "info", "--without-gossip", "--without-mingle") -WorkingDirectory $backendDir
+  Start-Process -FilePath "py" -ArgumentList @("-3", "-m", "celery", "-A", "app.workers.celery_app", "worker", "-P", "solo", "-c", "1", "--prefetch-multiplier", "1", "-l", "info", "--without-gossip", "--without-mingle") -WorkingDirectory $backendDir
   Start-Process -FilePath "py" -ArgumentList @("-3", "-m", "celery", "-A", "app.workers.celery_app", "beat", "-l", "info") -WorkingDirectory $backendDir
   Write-Host "[restart] celery worker + beat started"
 }

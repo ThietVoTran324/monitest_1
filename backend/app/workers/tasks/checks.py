@@ -1,10 +1,8 @@
 import asyncio
-import socket
 import ssl
 import time
-from datetime import UTC, datetime, timedelta
-from ipaddress import ip_address
-from urllib.parse import urlsplit
+from datetime import UTC, datetime
+from urllib.parse import urljoin
 
 import httpx
 from sqlalchemy import select
@@ -15,17 +13,22 @@ from app.models.monitor import (
     CheckRun,
     CheckRunStatus,
     Incident,
-    IncidentStatus,
     Monitor,
     MonitorStatus,
 )
+from app.security.ssrf import assert_host_public, parse_host_and_port
+from app.services.check_apply_service import (
+    apply_check_result,
+    is_probe_failure,
+    should_send_still_down_alert,
+)
 from app.services.monitor_service import is_status_code_accepted
 from app.workers.celery_app import celery_app
-from app.workers.tasks.notify import send_incident_email
+from app.workers.tasks.notify import enqueue_alerts_for_monitor, process_email_outbox
 
 
 def _is_probe_failure(status: CheckRunStatus) -> bool:
-    return status not in {CheckRunStatus.UP, CheckRunStatus.SLOW}
+    return is_probe_failure(status)
 
 
 def _consensus_monitor_status(statuses: list[CheckRunStatus]) -> MonitorStatus:
@@ -82,58 +85,29 @@ def _should_send_still_down_alert(
     reminder_minutes: int,
     max_reminders: int,
 ) -> bool:
-    if reminder_minutes <= 0 or max_reminders <= 0:
-        return False
-    if (incident.reminder_count or 0) >= max_reminders:
-        return False
-    if now < incident.opened_at + timedelta(minutes=max(cooldown_minutes, 0)):
-        return False
-    if incident.last_alert_sent_at is None:
-        return False
-    return now >= incident.last_alert_sent_at + timedelta(minutes=reminder_minutes)
-
-
-def _parse_host_and_port(url: str) -> tuple[str, int, bool]:
-    parsed = urlsplit(url)
-    host = parsed.hostname or ""
-    is_https = parsed.scheme == "https"
-    if not host:
-        raise ValueError("invalid host")
-    if parsed.port:
-        return host, parsed.port, is_https
-    return host, (443 if is_https else 80), is_https
-
-
-def _is_forbidden_ip(raw_ip: str) -> bool:
-    try:
-        ip = ip_address(raw_ip)
-    except ValueError:
-        return True
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
+    return should_send_still_down_alert(
+        incident=incident,
+        now=now,
+        cooldown_minutes=cooldown_minutes,
+        reminder_minutes=reminder_minutes,
+        max_reminders=max_reminders,
     )
 
 
 async def _ensure_public_target(url: str) -> None:
-    host, port, _ = _parse_host_and_port(url)
-    if host.lower() in {"localhost"} or host.lower().endswith(".local"):
-        raise ValueError("target host is local/internal")
-    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    if not infos:
-        raise ValueError("target host does not resolve")
-    for info in infos:
-        resolved_ip = info[4][0]
-        if _is_forbidden_ip(resolved_ip):
-            raise ValueError("target resolves to private/internal IP")
+    await assert_host_public(url)
+
+
+async def _read_body_capped(response: httpx.Response, max_bytes: int) -> None:
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"ssrf: response body exceeds limit ({max_bytes} bytes)")
 
 
 async def _collect_network_metrics(url: str, timeout_seconds: int) -> tuple[int | None, int | None, int | None]:
-    host, port, is_https = _parse_host_and_port(url)
+    host, port, is_https = parse_host_and_port(url)
     loop = asyncio.get_running_loop()
     dns_ms: int | None = None
     tcp_ms: int | None = None
@@ -171,6 +145,55 @@ async def _collect_network_metrics(url: str, timeout_seconds: int) -> tuple[int 
     return dns_ms, tcp_ms, tls_ms
 
 
+async def _http_get_ssrf_safe(
+    client: httpx.AsyncClient,
+    url: str,
+    timeout_seconds: int,
+    max_redirects: int,
+    max_response_bytes: int,
+) -> tuple[httpx.Response, int | None, str]:
+    """GET with per-hop SSRF checks, manual redirects, and capped body read.
+
+    Returns (final_response, ttfb_ms, final_url). The response body is already consumed.
+    """
+    current_url = url
+    redirects_followed = 0
+    ttfb_ms: int | None = None
+
+    while True:
+        await _ensure_public_target(current_url)
+        req_start = time.perf_counter()
+        async with client.stream(
+            "GET",
+            current_url,
+            timeout=timeout_seconds,
+            follow_redirects=False,
+        ) as response:
+            hop_ttfb = int((time.perf_counter() - req_start) * 1000)
+            if ttfb_ms is None:
+                ttfb_ms = hop_ttfb
+
+            location = response.headers.get("location")
+            if response.is_redirect and location:
+                if redirects_followed >= max_redirects:
+                    raise ValueError("ssrf: redirect limit exceeded")
+                next_url = urljoin(str(response.url), location)
+                redirects_followed += 1
+                current_url = next_url
+                continue
+
+            await _read_body_capped(response, max_response_bytes)
+            # Capture fields before leaving the stream context.
+            final = httpx.Response(
+                status_code=response.status_code,
+                headers=response.headers,
+                content=b"",
+                request=response.request,
+                extensions=response.extensions,
+            )
+            return final, ttfb_ms, str(response.url)
+
+
 async def _perform_probe(
     client: httpx.AsyncClient,
     monitor: Monitor,
@@ -204,14 +227,16 @@ async def _perform_probe(
             except Exception:
                 dns_resolve_ms, tcp_connect_ms, tls_handshake_ms = None, None, None
 
-            req_start = time.perf_counter()
-            async with client.stream("GET", monitor.url, timeout=monitor.timeout_seconds) as response:
-                ttfb_ms = int((time.perf_counter() - req_start) * 1000)
-                await response.aread()
+            response, ttfb_ms, final_url = await _http_get_ssrf_safe(
+                client=client,
+                url=monitor.url,
+                timeout_seconds=monitor.timeout_seconds,
+                max_redirects=settings.ssrf_max_redirects,
+                max_response_bytes=settings.ssrf_max_response_bytes,
+            )
             finished_at = datetime.now(UTC)
             response_time_ms = int((finished_at - started_at).total_seconds() * 1000)
             status_code = response.status_code
-            final_url = str(response.url)
             content_type = response.headers.get("content-type")
             run_status = _status_from_http(
                 status_code=response.status_code,
@@ -291,7 +316,7 @@ async def _check_http_monitor_async(monitor_id: str) -> None:
             if not active_region:
                 raise RuntimeError(f"monitor {monitor.id} has no active_region configured")
 
-            async with httpx.AsyncClient(follow_redirects=True) as client:
+            async with httpx.AsyncClient(follow_redirects=False) as client:
                 primary_probe = await _perform_probe(
                     client=client,
                     monitor=monitor,
@@ -319,82 +344,20 @@ async def _check_http_monitor_async(monitor_id: str) -> None:
             )
             session.add(check_run)
             await session.flush()
-            status = primary_probe["status"]
-            if not isinstance(status, CheckRunStatus):
-                raise RuntimeError(f"monitor {monitor.id} check status is invalid")
-            monitor.current_status = (
-                MonitorStatus.DOWN
-                if _is_probe_failure(status)
-                else (MonitorStatus.SLOW if status == CheckRunStatus.SLOW else MonitorStatus.UP)
+
+            outcome = await apply_check_result(
+                session,
+                monitor.id,
+                check_run,
+                alert_cooldown_minutes=settings.alert_cooldown_minutes,
+                alert_still_down_reminder_minutes=settings.alert_still_down_reminder_minutes,
+                alert_max_reminders_per_incident=settings.alert_max_reminders_per_incident,
             )
-
-            finished_at = primary_probe["finished_at"]
-            response_time_ms = primary_probe["response_time_ms"]
-            status_code = primary_probe["status_code"]
-            error_type = primary_probe["error_type"]
-            error_message = primary_probe["error_message"]
-            monitor.last_checked_at = finished_at
-            monitor.last_response_time_ms = response_time_ms
-            monitor.last_status_code = status_code
-            monitor.last_error_message = error_message
-            if monitor.current_status in {MonitorStatus.UP, MonitorStatus.SLOW}:
-                monitor.last_success_at = finished_at
-
-            open_incident_row = await session.execute(
-                select(Incident)
-                .where(
-                    Incident.monitor_id == monitor.id,
-                    Incident.status == IncidentStatus.OPEN,
-                )
-                .order_by(Incident.opened_at.desc())
-                .limit(1)
-            )
-            open_incident = open_incident_row.scalar_one_or_none()
-
-            if monitor.current_status in {MonitorStatus.UP, MonitorStatus.SLOW}:
-                if open_incident is not None:
-                    open_incident.status = IncidentStatus.CLOSED
-                    open_incident.closed_at = finished_at
-                    open_incident.close_reason = "Recovered by successful check"
-                    await session.flush()
-                    send_incident_email.delay(
-                        str(monitor.id),
-                        str(open_incident.id),
-                        "incident_recovered",
-                    )
-            else:
-                if open_incident is None:
-                    incident = Incident(
-                        monitor_id=monitor.id,
-                        opened_at=finished_at,
-                        status=IncidentStatus.OPEN,
-                        open_reason=error_message or (error_type or "check_failed"),
-                        first_failed_check_id=check_run.id,
-                        last_failed_check_id=check_run.id,
-                    )
-                    session.add(incident)
-                    await session.flush()
-                    send_incident_email.delay(
-                        str(monitor.id),
-                        str(incident.id),
-                        "incident_opened",
-                    )
-                else:
-                    open_incident.last_failed_check_id = check_run.id
-                    if _should_send_still_down_alert(
-                        incident=open_incident,
-                        now=finished_at,
-                        cooldown_minutes=settings.alert_cooldown_minutes,
-                        reminder_minutes=settings.alert_still_down_reminder_minutes,
-                        max_reminders=settings.alert_max_reminders_per_incident,
-                    ):
-                        send_incident_email.delay(
-                            str(monitor.id),
-                            str(open_incident.id),
-                            "still_down",
-                        )
-
+            queued = await enqueue_alerts_for_monitor(session, monitor, outcome.alerts)
             await session.commit()
+
+            if queued:
+                process_email_outbox.delay()
     finally:
         # Celery on Windows can run tasks across short-lived loops; dispose pooled
         # asyncpg connections so we don't reuse transports tied to a closed loop.

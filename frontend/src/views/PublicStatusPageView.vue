@@ -69,7 +69,6 @@ onMounted(() => {
         <thead>
           <tr>
             <th>Monitor</th>
-            <th>URL</th>
             <th>Status</th>
             <th>Last checked</th>
             <th>Last ms</th>
@@ -78,7 +77,6 @@ onMounted(() => {
         <tbody>
           <tr v-for="m in page.monitors" :key="m.id">
             <td>{{ m.name }}</td>
-            <td><small>{{ m.url }}</small></td>
             <td><UiBadge :tone="statusTone(m.current_status)">{{ m.current_status }}</UiBadge></td>
             <td>{{ fmtDateTime(m.last_checked_at) }}</td>
             <td>{{ m.last_response_time_ms ?? "n/a" }}</td>
@@ -94,17 +92,17 @@ onMounted(() => {
         <thead>
           <tr>
             <th>Opened</th>
+            <th>Closed</th>
             <th>Status</th>
             <th>Monitor</th>
-            <th>Reason</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="i in page.incidents" :key="i.id">
             <td>{{ fmtDateTime(i.opened_at) }}</td>
+            <td>{{ fmtDateTime(i.closed_at) }}</td>
             <td><UiBadge :tone="i.status === 'open' ? 'danger' : 'success'">{{ i.status }}</UiBadge></td>
             <td><small>{{ i.monitor_id }}</small></td>
-            <td>{{ i.open_reason ?? i.close_reason ?? "n/a" }}</td>
           </tr>
         </tbody>
       </table>

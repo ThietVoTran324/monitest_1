@@ -5,12 +5,14 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps_auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.monitor import CheckRun, CheckRunStatus, Monitor, MonitorStatus
 from app.models.monitor_expiry import MonitorExpiryStatus
 from app.models.user import User
 from app.schemas.monitor import DashboardRegionSummaryItem, DashboardSummaryResponse, MonitorListItem
 from app.schemas.monitor_expiry import ExpirySummaryResponse
+from app.services.freshness_service import evaluate_monitor_freshness
 from app.services.monitor_service import get_monitor_probe_regions_map, get_monitor_risk_fields
 from app.services.uptime_service import aggregate_uptime_for_user, clamp_uptime_range, default_uptime_window
 
@@ -23,6 +25,13 @@ def _to_monitor_item(
     last_failure_at: datetime | None = None,
     consecutive_failures: int = 0,
 ) -> MonitorListItem:
+    fresh = evaluate_monitor_freshness(
+        last_checked_at=m.last_checked_at,
+        interval_seconds=m.interval_seconds,
+        is_paused=m.is_paused or m.current_status == MonitorStatus.PAUSED,
+        stale_factor=settings.monitor_stale_factor,
+        min_buffer_seconds=settings.monitor_stale_min_buffer_seconds,
+    )
     return MonitorListItem(
         id=m.id,
         name=m.name,
@@ -40,6 +49,8 @@ def _to_monitor_item(
         last_failure_at=last_failure_at,
         consecutive_failures=consecutive_failures,
         created_at=m.created_at,
+        is_stale=fresh.is_stale,
+        freshness=fresh.freshness,
     )
 
 
@@ -64,6 +75,21 @@ async def get_dashboard_summary(
     )
     row = q.one()
 
+    monitors_rows = await session.execute(
+        select(Monitor).where(Monitor.user_id == user.id, Monitor.deleted_at.is_(None))
+    )
+    stale_count = 0
+    for m in monitors_rows.scalars().all():
+        fresh = evaluate_monitor_freshness(
+            last_checked_at=m.last_checked_at,
+            interval_seconds=m.interval_seconds,
+            is_paused=m.is_paused or m.current_status == MonitorStatus.PAUSED,
+            stale_factor=settings.monitor_stale_factor,
+            min_buffer_seconds=settings.monitor_stale_min_buffer_seconds,
+        )
+        if fresh.is_stale:
+            stale_count += 1
+
     try:
         if uptime_from is not None or uptime_to is not None:
             uf, ut = clamp_uptime_range(uptime_from, uptime_to)
@@ -81,6 +107,7 @@ async def get_dashboard_summary(
         checking=int(row[4] or 0),
         slow=int(row[5] or 0),
         paused=int(row[6] or 0),
+        stale=stale_count,
         avg_response_time_ms=float(row[7]) if row[7] is not None else None,
         uptime_window_from=uf,
         uptime_window_to=ut,

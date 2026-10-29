@@ -1,0 +1,33 @@
+# Sprint8 T4: FE login smoke via Playwright (build + preview). Does not need prod DB.
+name: E2E smoke
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/e2e-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  playwright-login:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright smoke
+        run: npm run e2e:smoke
+        env:
+          CI: "true"

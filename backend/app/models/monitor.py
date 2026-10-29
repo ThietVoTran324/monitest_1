@@ -7,11 +7,13 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,6 +71,12 @@ class AlertSendStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class EmailOutboxStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+
+
 class Monitor(Base):
     __tablename__ = "monitors"
 
@@ -114,8 +122,14 @@ class Monitor(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Outbox retry overrides (null = use system settings)
+    alert_outbox_max_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alert_outbox_backoff_seconds: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="monitors")
+    email_outbox: Mapped[list["EmailOutbox"]] = relationship(
+        "EmailOutbox", back_populates="monitor", cascade="all, delete-orphan"
+    )
     check_runs: Mapped[list["CheckRun"]] = relationship(
         "CheckRun", back_populates="monitor", cascade="all, delete-orphan"
     )
@@ -181,6 +195,14 @@ class CheckRun(Base):
 
 class Incident(Base):
     __tablename__ = "incidents"
+    __table_args__ = (
+        Index(
+            "uq_incidents_one_open_per_monitor",
+            "monitor_id",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     monitor_id: Mapped[uuid.UUID] = mapped_column(
@@ -255,3 +277,33 @@ class AlertEvent(Base):
 
     incident: Mapped[Incident | None] = relationship("Incident", back_populates="alert_events")
     monitor: Mapped[Monitor] = relationship("Monitor", back_populates="alert_events")
+
+
+class EmailOutbox(Base):
+    __tablename__ = "email_outbox"
+    __table_args__ = (Index("ix_email_outbox_status_next", "status", "next_attempt_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("monitors.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    to_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    status: Mapped[EmailOutboxStatus] = mapped_column(
+        Enum(EmailOutboxStatus, name="email_outbox_status", values_callable=_enum_values),
+        nullable=False,
+        default=EmailOutboxStatus.PENDING,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    monitor: Mapped[Monitor] = relationship("Monitor", back_populates="email_outbox")
+    incident: Mapped[Incident | None] = relationship("Incident")

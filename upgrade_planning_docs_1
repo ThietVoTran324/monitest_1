@@ -537,3 +537,23 @@ Cap nhat ket qua da chay:
 - [ ] Chay checklist `planning-docs/SMOKE-CHECKLIST.md` tren deploy.
 - [ ] Luu lai bang chung endpoint response (summary + monitor detail + incidents + alerts).
 - [ ] Chot “Optional smoke pass” de dong hoan toan plan Phase A.
+
+## 15) Go-live tren VPS dung chung (chua lam)
+
+Cap nhat 2026-10-26. Nguon so lieu may: `server-context.md`. Ke hoach tung buoc: `planning-docs/GO-LIVE-PINVPS01.md`.
+
+Tinh trang codebase:
+- Phase A/B/C upgrade, active region, runtime hardening, va pipeline migrate-qua-api da nam trong code.
+- Chua go-live tren `pinvps01`.
+
+May dich:
+- `pinvps01`: 2 CPU, 3.8 GiB RAM, khong swap, con khoang 19 GB dia.
+- `monitest.top` tren may nay la app khac (`/opt/pinterest`) phia sau Caddy. Khong dung thu muc, compose, Postgres, Redis cua app do.
+- MONI se o `/opt/moni`, chi mo `127.0.0.1:8010` va `127.0.0.1:4173`.
+
+Viec con lai truoc khi bat container:
+- Chon hostname public cho MONI (khong phai `monitest.top`).
+- Doc `/etc/caddy/Caddyfile` roi them site, khong ghi de file.
+- Them swap nho truoc khi start, vi may khong co swap.
+- Dien `.env` production va chi tro GitHub `VPS_HOST` vao may nay sau khi smoke tay pass.
+- Runbook `DEPLOY-RUNBOOK-X3MPHIM.md` (Nginx + `x3mphim.click`) khong ap dung cho may nay.

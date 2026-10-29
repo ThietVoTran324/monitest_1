@@ -61,7 +61,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     steps:
-      - name: Deploy over SSH
+      - name: Checkout deploy script
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH (atomic script)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -69,30 +72,10 @@ jobs:
           port: ${{ secrets.VPS_PORT || '22' }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
-          script: |
-            set -euo pipefail
-            cd /opt/moni
-
-            sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=${{ needs.build-and-push.outputs.backend_image }}|g" .env
-            sed -i "s|^FRONTEND_IMAGE=.*|FRONTEND_IMAGE=${{ needs.build-and-push.outputs.frontend_image }}|g" .env
-
-            docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" -p "${{ secrets.GHCR_TOKEN }}"
-            docker compose --env-file .env -f docker-compose.prod.yml pull
-
-            docker compose --env-file .env -f docker-compose.prod.yml up -d postgres redis
-
-            BACKUP_FILE="/opt/moni/backups/moni_$(date +%Y%m%d_%H%M%S).sql"
-            mkdir -p /opt/moni/backups
-            docker compose --env-file .env -f docker-compose.prod.yml exec -T postgres \
-              pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "$BACKUP_FILE"
-
-            # Run migrations through the same long-lived api service container to avoid
-            # any env/profile drift between migration runtime and serving runtime.
-            docker compose --env-file .env -f docker-compose.prod.yml up -d api
-            docker compose --env-file .env -f docker-compose.prod.yml exec -T api alembic upgrade head
-
-            # Restart app components after schema upgrade so all processes pick up new code/schema.
-            docker compose --env-file .env -f docker-compose.prod.yml up -d frontend
-            docker compose --env-file .env -f docker-compose.prod.yml restart api worker beat
-
-            curl -fsS http://127.0.0.1:8010/api/v1/health
+          envs: BACKEND_IMAGE,FRONTEND_IMAGE,GHCR_USERNAME,GHCR_TOKEN
+          script_path: deploy/deploy_release.sh
+        env:
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ needs.build-and-push.outputs.frontend_image }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}

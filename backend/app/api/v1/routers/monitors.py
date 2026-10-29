@@ -24,6 +24,7 @@ from app.schemas.monitor import (
     MonitorUptimeResponse,
     RunCheckResponse,
 )
+from app.services.freshness_service import evaluate_monitor_freshness
 from app.services.monitor_service import (
     MonitorValidationError,
     get_monitor_probe_regions_map,
@@ -47,12 +48,24 @@ from app.workers.tasks.expiry import _check_monitor_expiry_async, check_monitor_
 router = APIRouter(prefix="/monitors", tags=["monitors"])
 
 
+def _freshness_fields(m: Monitor) -> tuple[bool, str]:
+    result = evaluate_monitor_freshness(
+        last_checked_at=m.last_checked_at,
+        interval_seconds=m.interval_seconds,
+        is_paused=m.is_paused or m.current_status == MonitorStatus.PAUSED,
+        stale_factor=settings.monitor_stale_factor,
+        min_buffer_seconds=settings.monitor_stale_min_buffer_seconds,
+    )
+    return result.is_stale, result.freshness
+
+
 def to_monitor_item(
     m: Monitor,
     probe_regions: list[str],
     last_failure_at: datetime | None = None,
     consecutive_failures: int = 0,
 ) -> MonitorListItem:
+    is_stale, freshness = _freshness_fields(m)
     return MonitorListItem(
         id=m.id,
         name=m.name,
@@ -70,10 +83,13 @@ def to_monitor_item(
         last_failure_at=last_failure_at,
         consecutive_failures=consecutive_failures,
         created_at=m.created_at,
+        is_stale=is_stale,
+        freshness=freshness,
     )
 
 
 def to_monitor_detail(m: Monitor, probe_regions: list[str]) -> MonitorDetailResponse:
+    is_stale, freshness = _freshness_fields(m)
     return MonitorDetailResponse(
         id=m.id,
         user_id=m.user_id,
@@ -98,6 +114,8 @@ def to_monitor_detail(m: Monitor, probe_regions: list[str]) -> MonitorDetailResp
         created_at=m.created_at,
         updated_at=m.updated_at,
         deleted_at=m.deleted_at,
+        is_stale=is_stale,
+        freshness=freshness,
     )
 
 
