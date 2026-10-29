@@ -1,10 +1,11 @@
 # MONI
 
+**Live demo:** https://monitoring1.io.vn
+
 Uptime-style website monitoring: HTTP checks, incidents, email alerts, status pages, SSL/domain expiry — built for correctness on a small shared VPS.
 
 | | |
 |--|--|
-| **Production** | https://monitoring1.io.vn |
 | **API health** | https://monitoring1.io.vn/api/v1/health |
 | **Host** | `pinvps01` (`116.118.9.162`), path `/opt/moni` |
 | **Coexists with** | `https://monitest.top` → `/opt/pinterest` (do not touch) |
@@ -19,7 +20,7 @@ Uptime-style website monitoring: HTTP checks, incidents, email alerts, status pa
 | Alembic head | `d3e4f5a6b7c8` |
 | UI smoke (auth / monitor / check) | **OK** |
 | CI `migrate-smoke` + GHCR `build-and-push` | On every push to `main` |
-| CD SSH → `/opt/moni` | **Off until enabled** (see [CI/CD](#cicd)) |
+| CD SSH → `/opt/moni` | Gated by `ENABLE_PROD_DEPLOY` + deploy secrets |
 
 Hardening wave log: [`docs/Implement_docs/build_history/`](docs/Implement_docs/build_history/) · bugs: [`docs/Implement_docs/bug_history.md`](docs/Implement_docs/bug_history.md)
 
@@ -43,23 +44,6 @@ Hardening wave log: [`docs/Implement_docs/build_history/`](docs/Implement_docs/b
 - **Auth:** JWT access/refresh, SMTP, Google OAuth  
 - **Prod:** Docker Compose + **Caddy** (TLS) on shared VPS  
 - **CI/CD:** GitHub Actions → GHCR → optional SSH `deploy/deploy_release.sh`
-
-## Repository layout
-
-| Path | Role |
-|------|------|
-| `backend/` | API, models, Alembic, Celery |
-| `frontend/` | SPA |
-| `deploy/deploy_release.sh` | Atomic VPS deploy (pull, backup, migrate, health×2, prune) |
-| `docker-compose.prod.yml` | Production stack |
-| `.env.prod.example` / `.env.images.example` | Env templates (secrets vs image tags) |
-| `docs/Planing_docs/moni/` | Macro plan + sprint map |
-| `docs/Implement_docs/Moni_Sprint*/` | Per-sprint BR / decisions / checklist |
-| `docs/Implement_docs/build_history/` | Go-live / release chronicle |
-| `docs/Implement_docs/bug_history.md` | Wave bugs + prevention |
-| `planning-docs/` | Older MVP/runbook docs (see GO-LIVE for current host) |
-| `scripts/` | Local restart, smoke, backup/restore drills |
-| `.github/workflows/` | `deploy.yml` (migrate + build + optional deploy), `e2e-smoke.yml` |
 
 ## Architecture (short)
 
@@ -119,25 +103,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\check_celery_runtime.ps1 -Str
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke_local_gate.ps1
 ```
 
-## Production on `pinvps01`
-
-- **Domain:** `monitoring1.io.vn` (+ www)  
-- **Dir:** `/opt/moni` (`.env`, `.env.images`, `docker-compose.prod.yml`, `backups/`)  
-- **Proxy:** Caddy append site — keep `monitest.top` block unchanged  
-- **Images:** `ghcr.io/thietvotran324/moni-backend:<sha>` / `moni-frontend:<sha>` (lowercase owner)  
-- **Swap:** 2G recommended before first `compose up` on 3.8 GiB RAM host  
-
-Manual bring-up / verify:
-
-```bash
-cd /opt/moni
-docker compose --env-file .env --env-file .env.images -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:8010/api/v1/health
-curl -fsS https://monitoring1.io.vn/api/v1/health
-```
-
-Details: [`planning-docs/GO-LIVE-PINVPS01.md`](planning-docs/GO-LIVE-PINVPS01.md) · [`docs/Implement_docs/Moni_Sprint0/dns_caddy_golive.md`](docs/Implement_docs/Moni_Sprint0/dns_caddy_golive.md)
-
 ## CI/CD
 
 Workflow: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
@@ -146,32 +111,10 @@ Workflow: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
 push main
   → migrate-smoke (empty Postgres + alembic upgrade head)
   → build-and-push (GHCR, lowercase image path)
-  → deploy (ONLY if ENABLE_PROD_DEPLOY=true)
+  → deploy (if ENABLE_PROD_DEPLOY=true and secrets set)
 ```
 
-### Is CD on right now?
-
-**No — not until you flip the gate.**  
-Deploy is intentionally skipped unless:
-
-1. Repo **Variables:** `ENABLE_PROD_DEPLOY` = `true`  
-2. Repo **Secrets:** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `GHCR_USERNAME`, `GHCR_TOKEN` (optional `VPS_PORT`) pointing at **`pinvps01`**
-
-Until then: every `main` push still runs migrate + build/push images; SSH deploy does not run (workflow stays green).
-
-Notes: [`docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md`](docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md)
-
-After enabling CD, first successful deploy pulls tags into `/opt/moni` via `deploy_release.sh` (backup → migrate → recreate app containers → health×2 → prune).
-
-## Backup / RPO
-
-| | |
-|--|--|
-| RPO target | ≤ 24h (or spacing between deploy dumps) |
-| Scripts | `scripts/backup_pg_dump.*`, `restore_pg_drill.*`, `drill_smoke.ps1` |
-| SSOT | [`docs/Implement_docs/Moni_Sprint8/RPO_RTO.md`](docs/Implement_docs/Moni_Sprint8/RPO_RTO.md) |
-
-Restore drills use a **separate** DB name — never overwrite primary. Keep dumps under `backups/` (gitignored); copy off-host for real RPO.
+Notes: [`docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md`](docs/Implement_docs/Moni_Sprint9/CI_CD_HARDEN_NOTES.md) · go-live: [`planning-docs/GO-LIVE-PINVPS01.md`](planning-docs/GO-LIVE-PINVPS01.md)
 
 ## Docs map
 
@@ -196,7 +139,3 @@ Restore drills use a **separate** DB name — never overwrite primary. Keep dump
 5. Celery: API only enqueues; need worker (+ beat for schedule). Prefer `scripts/restart_celery_runtime.ps1` locally.  
 6. Shared VPS: never `compose` against `/opt/pinterest`; only `/opt/moni`.  
 7. TLS right after new Caddy site: wait for ACME “certificate obtained” before declaring failure.
-
-## License / authorship
-
-Private project repo. Prefer commits **without** Cursor co-author trailers on `main`.
