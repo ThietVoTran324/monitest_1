@@ -7,8 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE_NAME: ${{ github.repository_owner }}/moni-backend
-  FRONTEND_IMAGE_NAME: ${{ github.repository_owner }}/moni-frontend
 
 jobs:
   build-and-push:
@@ -22,6 +20,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # GHCR requires lowercase repository path (owner may have mixed case).
+      - name: Lowercase image names
+        id: image
+        run: |
+          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "backend_name=${OWNER_LC}/moni-backend" >> "$GITHUB_OUTPUT"
+          echo "frontend_name=${OWNER_LC}/moni-frontend" >> "$GITHUB_OUTPUT"
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -39,8 +45,8 @@ jobs:
           context: ./backend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.backend_name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.backend_name }}:latest
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
@@ -48,14 +54,14 @@ jobs:
           context: ./frontend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.frontend_name }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.frontend_name }}:latest
 
       - name: Export image tags
         id: meta
         run: |
-          echo "backend_image=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "frontend_image=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "backend_image=${{ env.REGISTRY }}/${{ steps.image.outputs.backend_name }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${{ env.REGISTRY }}/${{ steps.image.outputs.frontend_name }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
   deploy:
     runs-on: ubuntu-latest
